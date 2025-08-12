@@ -2,6 +2,10 @@ import torch
 from torch import nn
 import numpy as np
 
+
+# General patter:
+# write the forward and backward calculation explicitly as static functions which are invoked using the apply function
+# from the corresponding module. This is standard practice in PyTorch.
 class LinearFn(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, W, b):

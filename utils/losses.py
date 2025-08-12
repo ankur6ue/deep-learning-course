@@ -36,6 +36,8 @@ class MSELossFn(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         # Retrieve the saved input from the forward pass
+        # If the forward function operates on n inputs the number of outputs in the corresponding backward function must
+        # also be n (assuming all inputs require gradients)
         y, g = ctx.saved_tensors
         B = y.size(1)
         return 2*(y - g)/B, torch.zeros(g.size())

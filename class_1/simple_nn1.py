@@ -1,35 +1,25 @@
 import torch
 from torch import nn
 import numpy as np
-import torch.nn.functional as F
+
 # compute derivative of swiGLU of a vector x and compare gradient calculated by autograd against manual calculation
 # See swiGLU section in https://arxiv.org/pdf/2410.10989 and swiglue{i}.jpg for derivation of manual derivative
 # Set the seed for reproducibility
 torch.manual_seed(42)
-
 import torch
+import sys
+import os
+# The below is ugly and not recommended, but lets us run the code as a file (python -m simple_nn1.py) instead
+# of converting it into a package..
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.linear import LinearModule
 from utils.relu import ReLUModule
 from utils.losses import MSELossModule
-from utils.optimizer import AdamOptimizer
+from utils.optimizer import AdamOptimizer, SimpleOptimizer
 import matplotlib.pyplot as plt
 import argparse
 import os
 import matplotlib
-
-
-# Here, we'll take each step in the calculation of the loss function using swiGLU and represent it as a graph. We'll
-# write the forward and backward calculation explicitly as static functions which are invoked using the apply function
-# from the corresponding module. This is standard practice in PyTorch. We learn several things from this exercise:
-# 1. If the forward function operates on n inputs the number of outputs in the corresponding backward function must
-# also be n (assuming all inputs require gradients)
-# 2. Inputs to a layer (which are activations of the previous layer) and intermediate calculations made in the forward
-# pass are generally re-used in the backward pass. This lets us trade memory for compute. We could save the inputs
-# and intermediate calculations using the save_for_backward function (more memory), or recompute in the
-# backward pass (more compute). This family of techniques is called activation checkpointing
-# 3. save_for_backward must be used to save tensors, while non-tensors (such as sizes) can be saved directly on the
-# context, see Sum function as an example and:
-# https://docs.pytorch.org/docs/stable/generated/torch.autograd.function.FunctionCtx.save_for_backward.html
 
 
 def create_dataset(N):
@@ -74,21 +64,17 @@ class SimpleNN(nn.Module):
         self.layers.append(self.fc1)
         self.layers.append(self.fc2)
 
-
     def forward(self, x):
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
         return x
 
-
     def zero_grad(self):
         for l in self.layers:
             # Zero the gradients, otherwise they'll accumulate
             l.weight.grad.zero_()
             l.bias.grad.zero_()
-
-
 
 def draw_movie_frame(model, frame_num):
     x_test = torch.linspace(-2 * np.pi, 2 * np.pi, 300)
@@ -114,35 +100,44 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train a simple neural network to model a sine function')
     parser.add_argument('--N', type=int, default=200, help='Number of points in the sine wave')
     parser.add_argument('--H', type=int, default=100, help='Size of hidden layer')
+    parser.add_argument('--capture_frames', action='store_true', help='If set, every other frame is'
+                                                                      'captured and saved to a frames directory')
+    parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
+    parser.add_argument('--lr', type=float, default=0.01, help='learning rate (default: 0.01)')
+    parser.add_argument('--iterations', type=int, default=2000, help='number of iterations')
+
     args = parser.parse_args()
     N = args.N # Number of points in the batch
     H = args.H # Size of the hidden layer
-
-    X, y = create_dataset(N)
+    num_iter = args.iterations
+    lr = args.lr
+    X, Y = create_dataset(N)
     # lets visualize the data:
     X = X.T # 1 * B
-    y = y.T # 1 * B
+    Y = Y.T # 1 * B
     X.requires_grad = True
     # create the model
     model = SimpleNN(1, H, 1)
     criterion = MSELossModule()
-    # optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    optimizer = AdamOptimizer(learning_rate=0.01)
-    num_iter = 2000
+    if args.optimizer == "adam":
+        optimizer = AdamOptimizer(learning_rate=lr)
+    else:
+        optimizer = SimpleOptimizer(learning_rate=lr)
 
     for iter in range(num_iter):
         # optimizer.zero_grad() # Zero the gradients
         o = model(X)    # Forward pass
-        loss = criterion(o, y)
+        loss = criterion(o, Y)
         if num_iter % 100 == 0:
             print(loss)
-        if num_iter % 2 == 0:
-            draw_movie_frame(model, iter/2)
+        if args.capture_frames:
+            if num_iter % 2 == 0:
+                draw_movie_frame(model, iter/2)
         loss.backward()
         optimizer.step(model.layers)
         model.zero_grad()
 
-    print('ok')
+    print('done')
 
     # generate test data
     x_test = torch.linspace(-2 * np.pi, 2 * np.pi, 300)
