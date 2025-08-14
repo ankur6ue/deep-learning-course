@@ -1,11 +1,18 @@
-import torch
+# Copyright 2025 Ankur Mohan
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+# documentation files (the “Software”), to deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
+# and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+# Software.
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+# THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 from torch import nn
 import numpy as np
-
-# compute derivative of swiGLU of a vector x and compare gradient calculated by autograd against manual calculation
-# See swiGLU section in https://arxiv.org/pdf/2410.10989 and swiglue{i}.jpg for derivation of manual derivative
-# Set the seed for reproducibility
-torch.manual_seed(42)
 import torch
 import sys
 import os
@@ -21,6 +28,10 @@ import argparse
 import os
 import matplotlib
 
+# Set the seed for reproducibility
+torch.manual_seed(42)
+
+# We train a simple neural network with 1 hidden layer to learn to predict the value of a sine function
 
 def create_dataset(N):
     np.random.seed(0)
@@ -104,12 +115,13 @@ if __name__ == "__main__":
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate (default: 0.01)')
-    parser.add_argument('--iterations', type=int, default=2000, help='number of iterations')
+    parser.add_argument('--epochs', type=int, default=200, help='number of epochs')
+    parser.add_argument('--batch_size', type=int, default=20, help='batch size (should divide N)')
 
     args = parser.parse_args()
     N = args.N # Number of points in the batch
     H = args.H # Size of the hidden layer
-    num_iter = args.iterations
+    B = args.batch_size
     lr = args.lr
     X, Y = create_dataset(N)
     # lets visualize the data:
@@ -124,18 +136,26 @@ if __name__ == "__main__":
     else:
         optimizer = SimpleOptimizer(learning_rate=lr)
 
-    for iter in range(num_iter):
-        # optimizer.zero_grad() # Zero the gradients
-        o = model(X)    # Forward pass
-        loss = criterion(o, Y)
-        if num_iter % 100 == 0:
-            print(loss)
-        if args.capture_frames:
-            if num_iter % 2 == 0:
-                draw_movie_frame(model, iter/2)
-        loss.backward()
-        optimizer.step(model.layers)
-        model.zero_grad()
+    c = 0 # global iteration count
+    for e in range(args.epochs):
+        # Each epoch uses a different permutation of indices
+        indices = torch.randperm(N)
+        num_iter_per_epoch = (int)(N/args.batch_size)
+        for iter in range(num_iter_per_epoch):
+            batch_indices = indices[iter*B: (iter+1)*B]
+            X_ = X[:, batch_indices]
+            Y_ = Y[:, batch_indices]
+            o = model(X_)    # Forward pass
+            loss = criterion(o, Y_)
+            if args.capture_frames:
+                if c % 2 == 0:
+                    draw_movie_frame(model, c/2)
+            loss.backward()
+            optimizer.step(model.layers)
+            model.zero_grad()
+            c = c + 1
+        # print loss after every epoch
+        print(loss)
 
     print('done')
 

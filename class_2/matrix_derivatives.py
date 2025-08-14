@@ -1,6 +1,18 @@
+# Copyright 2025 Ankur Mohan
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+# documentation files (the “Software”), to deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
+# and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+# Software.
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+# THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import torch
 import numpy as np
-from torch import nn
 
 # Part 1
 ############################################
@@ -96,4 +108,7 @@ are_equal = np.allclose(W_grad_clone.numpy(), dL_dW.detach().numpy(), rtol=1e-5,
 # Assert are_equal == True
 if are_equal:
     print("Our calculation of DL_DW matches that of Pytorch")
+
+# Exercise: Add Mean Square Error Loss function on Y and calculate the derivative of its output against X, W, and b
+
 
