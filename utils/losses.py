@@ -11,7 +11,7 @@ class CrossEntropyLossFn(torch.autograd.Function):
 
         ctx.save_for_backward(probs, labels)
         B = y.size(1)
-        return -torch.sum(torch.log(probs[(labels.T, range(0, B))]))/B
+        return -torch.sum(torch.log(probs[(labels, range(0, B))]))/B
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -19,7 +19,7 @@ class CrossEntropyLossFn(torch.autograd.Function):
         probs_, labels = ctx.saved_tensors
         probs = torch.clone(probs_)
         B = probs.size(1)
-        probs[[labels.T, range(0, B)]] -= 1
+        probs[[labels, range(0, B)]] -= 1
         return probs/B, torch.zeros(labels.size())
 
 

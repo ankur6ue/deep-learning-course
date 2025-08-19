@@ -3,18 +3,26 @@ import numpy as np
 
 
 class SimpleOptimizer:
-    def __init__(self, learning_rate=0.01, reg=0.001):
+    def __init__(self, layers, learning_rate=0.01, reg=0.001):
+        self.layers = layers
         self.lr = learning_rate
         self.reg = reg
 
-    def step(self, layers):
-        for l in layers:
+    def step(self):
+        for l in self.layers:
             l.weight.data -= self.lr * (l.weight.grad + self.reg * l.weight.data)
             l.bias.data -= self.lr * l.bias.grad
 
+    def zero_grad(self):
+        for l in self.layers:
+            # Zero the gradients, otherwise they'll accumulate
+            l.weight.grad.zero_()
+            l.bias.grad.zero_()
+
 
 class AdamOptimizer:
-    def __init__(self, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-8):
+    def __init__(self, layers, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-8):
+        self.layers = layers
         self.learning_rate = learning_rate
         self.beta1 = beta1
         self.beta2 = beta2
@@ -23,12 +31,12 @@ class AdamOptimizer:
         self.v = {}  # Dictionary to store second moment estimates (v) for each parameter
         self.t = 0  # Timestep counter
 
-    def step(self, layers):
+    def step(self):
         """
         Performs a single optimization step.
         """
         self.t += 1  # Increment timestep
-        for l in layers:
+        for l in self.layers:
             layer_name = l.name
             # weights and biases
 
@@ -64,3 +72,9 @@ class AdamOptimizer:
             v_hat = self.v[param_name] / (1 - self.beta2 ** self.t)
             # Update parameters
             l.bias.data -= self.learning_rate * m_hat / (np.sqrt(v_hat) + self.epsilon)
+
+    def zero_grad(self):
+        for l in self.layers:
+            # Zero the gradients, otherwise they'll accumulate
+            l.weight.grad.zero_()
+            l.bias.grad.zero_()

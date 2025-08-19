@@ -1,4 +1,4 @@
-Monitoring training metrics
+Monitoring and tracking
 Optimizers
 Activation checkpointing
 Gradient accumulation

@@ -81,11 +81,6 @@ class SimpleNN(nn.Module):
         x = self.fc2(x)
         return x
 
-    def zero_grad(self):
-        for l in self.layers:
-            # Zero the gradients, otherwise they'll accumulate
-            l.weight.grad.zero_()
-            l.bias.grad.zero_()
 
 def draw_movie_frame(model, frame_num):
     x_test = torch.linspace(-2 * np.pi, 2 * np.pi, 300)
@@ -119,9 +114,9 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=20, help='batch size (should divide N)')
 
     args = parser.parse_args()
-    N = args.N # Number of points in the batch
+    N = args.N # Number of points in the entire dataset
     H = args.H # Size of the hidden layer
-    B = args.batch_size
+    B = args.batch_size # size of each batch used to average gradients
     lr = args.lr
     X, Y = create_dataset(N)
     # lets visualize the data:
@@ -132,9 +127,9 @@ if __name__ == "__main__":
     model = SimpleNN(1, H, 1)
     criterion = MSELossModule()
     if args.optimizer == "adam":
-        optimizer = AdamOptimizer(learning_rate=lr)
+        optimizer = AdamOptimizer(model.layers, learning_rate=lr)
     else:
-        optimizer = SimpleOptimizer(learning_rate=lr)
+        optimizer = SimpleOptimizer(model.layers, learning_rate=lr)
 
     c = 0 # global iteration count
     for e in range(args.epochs):
@@ -151,18 +146,16 @@ if __name__ == "__main__":
                 if c % 2 == 0:
                     draw_movie_frame(model, c/2)
             loss.backward()
-            optimizer.step(model.layers)
-            model.zero_grad()
+            optimizer.step()
+            optimizer.zero_grad()
             c = c + 1
         # print loss after every epoch
-        print(loss)
+        print(f"After Epoch {e}, Loss  = {loss.detach().squeeze().numpy(): .4f}")
 
-    print('done')
 
     # generate test data
     x_test = torch.linspace(-2 * np.pi, 2 * np.pi, 300)
     X = torch.tensor(x_test.unsqueeze(1), dtype=torch.float32).unsqueeze(1)
-
     y_pred = model(X.T).squeeze().detach().numpy()
     plt.plot(x_test, y_pred, color='red', label="NN Approximation")
     plt.plot(x_test, np.sin(x_test), color='green', linestyle='--', label="True sin(x)")
