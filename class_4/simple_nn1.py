@@ -117,14 +117,14 @@ if __name__ == "__main__":
     # This makes plots show up as a separate figure
     matplotlib.use('TkAgg')
     parser = argparse.ArgumentParser(description='Train a simple neural network to model a sine function')
-    parser.add_argument('--N', type=int, default=200, help='Number of points in the sine wave')
-    parser.add_argument('--H', type=int, default=100, help='Size of hidden layer')
+    parser.add_argument('--N', type=int, default=600, help='Number of points in the sine wave')
+    parser.add_argument('--H', type=int, default=150, help='Size of hidden layer')
     parser.add_argument('--capture_frames', action='store_true', help='If set, every other frame is'
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate (default: 0.01)')
-    parser.add_argument('--epochs', type=int, default=200, help='number of epochs')
-    parser.add_argument('--batch_size', type=int, default=20, help='batch size (should divide N)')
+    parser.add_argument('--epochs', type=int, default=1500, help='number of epochs')
+    parser.add_argument('--batch_size', type=int, default=600, help='batch size (should divide N)')
 
     args = parser.parse_args()
     N = args.N # Number of points in the entire dataset

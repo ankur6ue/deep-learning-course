@@ -28,9 +28,10 @@ class LinearFn(torch.autograd.Function):
 class LinearModule(nn.Module):
     def __init__(self, _in, _out, name):
         super().__init__()
-        scale = 1  # 0.5
-        self.weight = torch.randn(_out, _in) * np.sqrt(1 / _in) * scale
+        scale = 0.05 # Need to set a scale for class_2/simple_nn1.py example, when Simple Optimizer is being used
+        self.weight = torch.randn(_out, _in) * np.sqrt(2 / _in) * scale
         self.bias = torch.randn(_out, 1) * np.sqrt(1 / _in) * scale
+        self.bias = torch.zeros(_out, 1)
         # self.weight = l.weight.data
         self.weight.requires_grad = True  # _out * _in
         # self.bias = l.bias.data.unsqueeze(1) # _out * 1. The unsqueeze is to add the 2nd dimension
