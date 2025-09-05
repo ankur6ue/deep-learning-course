@@ -138,14 +138,15 @@ if __name__ == "__main__":
     # This makes plots show up as a separate figure
     matplotlib.use('TkAgg')
     parser = argparse.ArgumentParser(description='Train a simple neural network to model a sine function')
-    parser.add_argument('--N', type=int, default=200, help='Number of points in the sine wave')
-    parser.add_argument('--H', type=int, default=100, help='Size of hidden layer')
+    parser.add_argument('--N', type=int, default=600, help='Number of points in the sine wave')
+    parser.add_argument('--H', type=int, default=150, help='Size of hidden layer')
     parser.add_argument('--capture_frames', action='store_true', help='If set, every other frame is'
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
-    parser.add_argument('--lr', type=float, default=0.01, help='learning rate (default: 0.01)')
-    parser.add_argument('--epochs', type=int, default=200, help='number of epochs')
-    parser.add_argument('--batch_size', type=int, default=20, help='batch size (should divide N)')
+    parser.add_argument('--lr_scheduler', choices=['linear', 'cosine', 'constant'], default='linear')
+    parser.add_argument('--lr', type=float, default=0.07, help='learning rate (default: 0.07)')
+    parser.add_argument('--epochs', type=int, default=500, help='number of epochs')
+    parser.add_argument('--batch_size', type=int, default=300, help='batch size (should divide N)')
 
     args = parser.parse_args()
     N = args.N # Number of points in the batch
@@ -161,9 +162,9 @@ if __name__ == "__main__":
     model = SimpleNN(1, H, 1)
     criterion = MSELossModule()
     if args.optimizer == "adam":
-        optimizer = AdamOptimizer(learning_rate=lr)
+        optimizer = AdamOptimizer(model.layers, learning_rate=lr)
     else:
-        optimizer = SimpleOptimizer(learning_rate=lr)
+        optimizer = SimpleOptimizer(model.layers, learning_rate=lr)
 
     dataset = MyDataset(X, Y)
     sampler = RandomSampler(dataset)  # samples elements randomly without replacement
@@ -177,7 +178,7 @@ if __name__ == "__main__":
                 if c % 2 == 0:
                     draw_movie_frame(model, c/2)
             loss.backward()
-            optimizer.step(model.layers)
+            optimizer.step()
             model.zero_grad()
             c = c + 1
         # print loss after every epoch
