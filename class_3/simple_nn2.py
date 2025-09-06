@@ -14,7 +14,7 @@ import argparse
 import os
 import matplotlib
 import sys
-# The below is ugly and not recommended, but lets us run the code as a file (python -m simple_nn1.py) instead
+# The below is ugly and not recommended, but lets us run the code as a file (python -m simple_nn1_mlflow.py) instead
 # of converting it into a package..
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.linear import LinearModule

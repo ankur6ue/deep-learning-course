@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import sys
 import os
-# The below is ugly and not recommended, but lets us run the code as a file (python -m simple_nn1.py) instead
+# The below is ugly and not recommended, but lets us run the code as a file (python -m simple_nn1_mlflow.py) instead
 # of converting it into a package..
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.linear import LinearModule
@@ -69,8 +69,8 @@ class SimpleNN(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
         super().__init__()
         self.relu1 = nn.ReLU()
-        self.fc1 = LinearModule(input_size, hidden_size, "fc1")
-        self.fc2 = LinearModule(hidden_size, output_size, "fc2")
+        self.fc1 = LinearModule(input_size, hidden_size, "fc1", 1)
+        self.fc2 = LinearModule(hidden_size, output_size, "fc2", 1)
         self.relu = ReLUModule()  # Activation function
         self.layers = []
         self.layers.append(self.fc1)
@@ -110,7 +110,7 @@ if __name__ == "__main__":
     parser.add_argument('--capture_frames', action='store_true', help='If set, every other frame is'
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
-    parser.add_argument('--lr_scheduler', choices=['linear', 'cosine', 'constant'], default='linear')
+    parser.add_argument('--lr_scheduler', choices=['linear', 'cosine', 'constant'], default='constant')
     parser.add_argument('--lr', type=float, default=0.07, help='learning rate (default: 0.07)')
     parser.add_argument('--epochs', type=int, default=500, help='number of epochs')
     parser.add_argument('--batch_size', type=int, default=300, help='batch size (should divide N)')
@@ -135,8 +135,13 @@ if __name__ == "__main__":
 
     num_iter_per_epoch = (int)(N / args.batch_size)
     num_steps = (int)(num_iter_per_epoch * args.epochs)
-    lr_scheduler = CosineLR(optimizer, num_steps, lr, 0.001)
-
+    if args.lr_scheduler == "cosine":
+        lr_scheduler = CosineLR(optimizer, num_steps, lr, 0.001)
+    if args.lr_scheduler == "linear":
+        lr_scheduler = LinearLR(optimizer, num_steps, lr, 0.001)
+    if args.lr_scheduler == "constant":
+        lr_scheduler = ConstantLR(optimizer, num_steps, lr, 0.001)
+    loss_func_history = []
     c = 0 # global iteration count
     for e in range(args.epochs):
         # Each epoch uses a different permutation of indices
@@ -154,20 +159,25 @@ if __name__ == "__main__":
             optimizer.step()
             optimizer.zero_grad()
             lr_scheduler.step(c)
+            loss_func_history.append(loss.item()) # .item extracts the value from a single element tensor,
+            # converting it into a python number
             c = c + 1
         # print loss after every epoch
-
-        print(f"After Epoch {e}, Loss  = {loss.detach().squeeze().numpy(): .4f}")
+        print(f"After Epoch {e}, Loss  = {loss.item(): .4f}")
 
 
     # generate test data
     x_test = torch.linspace(-2 * np.pi, 2 * np.pi, 300)
     X = torch.tensor(x_test.unsqueeze(1), dtype=torch.float32).unsqueeze(1)
-    y_pred = model(X.T).squeeze().detach().numpy()
+    y_pred = model(X.T).detach().squeeze().numpy()
     plt.plot(x_test, y_pred, color='red', label="NN Approximation")
     plt.plot(x_test, np.sin(x_test), color='green', linestyle='--', label="True sin(x)")
     plt.title("Neural Network Approximating sin(x)")
     plt.legend()
     plt.grid(True)
+    plt.show()
+    plt.plot(range(0,c), loss_func_history, color='red', label="Loss function progression")
+    plt.title("Progression of the loss function")
+    plt.legend()
     plt.show()
     print('done')

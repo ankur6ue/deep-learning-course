@@ -26,15 +26,15 @@ class LinearFn(torch.autograd.Function):
 
 
 class LinearModule(nn.Module):
-    def __init__(self, _in, _out, name):
+    def __init__(self, _in, _out, name, scale=1):
         super().__init__()
-        scale = 0.05 # Need to set a scale for class_2/simple_nn1.py example, when Simple Optimizer is being used
+        # Need to set a scale for class_2/simple_nn1_mlflow.py example, when Simple Optimizer is being used
+        # We implement the matrix mul in a linear layer as Wx + b, so the second dimension of W must match the input
+        # to the layer
         self.weight = torch.randn(_out, _in) * np.sqrt(2 / _in) * scale
         self.bias = torch.randn(_out, 1) * np.sqrt(1 / _in) * scale
         self.bias = torch.zeros(_out, 1)
-        # self.weight = l.weight.data
-        self.weight.requires_grad = True  # _out * _in
-        # self.bias = l.bias.data.unsqueeze(1) # _out * 1. The unsqueeze is to add the 2nd dimension
+        self.weight.requires_grad = True
         self.bias.requires_grad = True
         self.name = name
 

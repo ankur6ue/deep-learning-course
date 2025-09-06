@@ -23,17 +23,18 @@ from utils.linear import LinearModule
 from utils.relu import ReLUModule
 from utils.losses import MSELossModule
 from utils.optimizer import AdamOptimizer, SimpleOptimizer
+from utils.lr_scheduler import LinearLR, ConstantLR, CosineLR
 import matplotlib.pyplot as plt
 import argparse
 import os
 import matplotlib
-from torch.utils.data import Dataset, DataLoader, RandomSampler
-
-# We train a simple neural network with 1 hidden layer to learn to predict the value of a sine function
-# We use the pytorch dataloader and sampler instead of manual sampling as in simple_nn1_mlflow.py
-
+# MLFlow related
+import mlflow
+# start mlflow server by typing "mlflow ui" on command prompt. Default port is 5000
 # Set the seed for reproducibility
 torch.manual_seed(42)
+
+# We train a simple neural network with 1 hidden layer to learn to predict the value of a sine function
 
 def create_dataset(N):
     np.random.seed(0)
@@ -70,8 +71,8 @@ class SimpleNN(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
         super().__init__()
         self.relu1 = nn.ReLU()
-        self.fc1 = LinearModule(input_size, hidden_size, "fc1")
-        self.fc2 = LinearModule(hidden_size, output_size, "fc2")
+        self.fc1 = LinearModule(input_size, hidden_size, "fc1", 1)
+        self.fc2 = LinearModule(hidden_size, output_size, "fc2", 1)
         self.relu = ReLUModule()  # Activation function
         self.layers = []
         self.layers.append(self.fc1)
@@ -83,11 +84,6 @@ class SimpleNN(nn.Module):
         x = self.fc2(x)
         return x
 
-    def zero_grad(self):
-        for l in self.layers:
-            # Zero the gradients, otherwise they'll accumulate
-            l.weight.grad.zero_()
-            l.bias.grad.zero_()
 
 def draw_movie_frame(model, frame_num):
     x_test = torch.linspace(-2 * np.pi, 2 * np.pi, 300)
@@ -107,39 +103,12 @@ def draw_movie_frame(model, frame_num):
     plt.savefig(script_dir + "/frames" + "/frame%04d.png" % frame_num)
 
 
-# Create a Pytorch Dataset out of our data
-class MyDataset(Dataset):
-    def __init__(self, X, Y):
-        # Just some dummy data: features and labels
-        self.X = X
-        self.Y = Y
-
-    def __len__(self):
-        return X.shape[1]
-
-    def __getitem__(self, idx):
-        return self.X[:,idx], self.Y[:,idx]
-
-
-def collate_columns(batch):
-    # batch is a list of tuples: [(x1, y1), (x2, y2), ...]
-    xs, ys = zip(*batch)
-    # Now xs and ys are tuples of tensors with shape [1]
-    # Convert to shape [1, 1] and then concat along dim=1
-    xs = [x.unsqueeze(0) if x.dim() == 1 else x for x in xs]
-    ys = [y.unsqueeze(0) if y.dim() == 1 else y for y in ys]
-    # Concatenate along dim=1 instead of dim=0
-    x_cat = torch.cat(xs, dim=1)
-    y_cat = torch.cat(ys, dim=1)
-    return x_cat, y_cat
-
-
 if __name__ == "__main__":
     # This makes plots show up as a separate figure
     matplotlib.use('TkAgg')
     parser = argparse.ArgumentParser(description='Train a simple neural network to model a sine function')
     parser.add_argument('--N', type=int, default=600, help='Number of points in the sine wave')
-    parser.add_argument('--H', type=int, default=150, help='Size of hidden layer')
+    parser.add_argument('--H', type=int, default=20, help='Size of hidden layer')
     parser.add_argument('--capture_frames', action='store_true', help='If set, every other frame is'
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
@@ -149,9 +118,9 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=300, help='batch size (should divide N)')
 
     args = parser.parse_args()
-    N = args.N # Number of points in the batch
+    N = args.N # Number of points in the entire dataset
     H = args.H # Size of the hidden layer
-    B = args.batch_size
+    B = args.batch_size # size of each batch used to average gradients
     lr = args.lr
     X, Y = create_dataset(N)
     # lets visualize the data:
@@ -166,34 +135,69 @@ if __name__ == "__main__":
     else:
         optimizer = SimpleOptimizer(model.layers, learning_rate=lr)
 
-    dataset = MyDataset(X, Y)
-    sampler = RandomSampler(dataset)  # samples elements randomly without replacement
-    dataloader = DataLoader(dataset, batch_size=B, sampler=sampler, collate_fn=collate_columns)
-    c = 0 # global iteration count
-    for e in range(args.epochs):
-        for batch_idx, (X_, Y_) in enumerate(dataloader):
-            o = model(X_)    # Forward pass
-            loss = criterion(o, Y_)
-            if args.capture_frames:
-                if c % 2 == 0:
-                    draw_movie_frame(model, c/2)
-            loss.backward()
-            optimizer.step()
-            model.zero_grad()
-            c = c + 1
-        # print loss after every epoch
-        print(loss)
+    num_iter_per_epoch = (int)(N / args.batch_size)
+    num_steps = (int)(num_iter_per_epoch * args.epochs)
+    if args.lr_scheduler == "cosine":
+        lr_scheduler = CosineLR(optimizer, num_steps, lr, 0.001)
+    if args.lr_scheduler == "linear":
+        lr_scheduler = LinearLR(optimizer, num_steps, lr, 0.001)
+    if args.lr_scheduler == "constant":
+        lr_scheduler = ConstantLR(optimizer, num_steps, lr, 0.001)
+    loss_func_history = []
+    remote_server_uri = "http://127.0.0.1:5000"  # set to your server URI,
+    mlflow.set_tracking_uri(remote_server_uri)
+    mlflow.set_experiment("Approximating a sine function using a simple NN")
+    with mlflow.start_run(): # run name generated at random by mlflow
+        # 1. Log parameters
+        mlflow.log_param("epochs", args.epochs)
+        mlflow.log_param("initial learning rate", args.lr)
+        mlflow.log_param("batch size", args.batch_size)
+        mlflow.log_param("optimizer", args.optimizer)
+        mlflow.log_param("learning rate schedule", args.lr_scheduler)
+        mlflow.log_param("model type", "MLP")
+        mlflow.log_param("hidden units", args.H)
 
-    print('done')
+        c = 0 # global iteration count
+        for e in range(args.epochs):
+            # Each epoch uses a different permutation of indices
+            indices = torch.randperm(N)
+            for iter in range(num_iter_per_epoch):
+                batch_indices = indices[iter*B: (iter+1)*B]
+                X_ = X[:, batch_indices]
+                Y_ = Y[:, batch_indices]
+                o = model(X_)    # Forward pass
+                loss = criterion(o, Y_)
+                if args.capture_frames:
+                    if c % 2 == 0:
+                        draw_movie_frame(model, c/2)
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                lr_scheduler.step(c)
+                loss_func_history.append(loss.item())
+                c = c + 1
+            # print loss after every epoch
+            print(f"After Epoch {e}, Loss  = {loss.item(): .4f}")
+            # also send to MLflow
+            # .item extracts the value from a single element tensor,
+            # converting it into a python number
+            mlflow.log_metrics(
+                {"loss": loss.item()},
+                step=e,
+            )
+
 
     # generate test data
     x_test = torch.linspace(-2 * np.pi, 2 * np.pi, 300)
     X = torch.tensor(x_test.unsqueeze(1), dtype=torch.float32).unsqueeze(1)
-
-    y_pred = model(X.T).squeeze().detach().numpy()
+    y_pred = model(X.T).detach().squeeze().numpy()
     plt.plot(x_test, y_pred, color='red', label="NN Approximation")
     plt.plot(x_test, np.sin(x_test), color='green', linestyle='--', label="True sin(x)")
     plt.title("Neural Network Approximating sin(x)")
     plt.legend()
     plt.grid(True)
     plt.show()
+    plt.plot(range(0,c), loss_func_history, color='red', label="Loss function progression")
+    plt.title("Progression of the loss function")
+    plt.legend()
+    print('done')

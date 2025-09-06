@@ -16,7 +16,7 @@ import numpy as np
 import torch
 import sys
 import os
-# The below is ugly and not recommended, but lets us run the code as a file (python -m simple_nn1.py) instead
+# The below is ugly and not recommended, but lets us run the code as a file (python -m simple_nn1_mlflow.py) instead
 # of converting it into a package..
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.optimizer import AdamOptimizer, SimpleOptimizer
@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 
 initial_lr = 0.1
 final_lr = 0.001
-epochs = 100
+num_training_steps = 100
 
 # Dummy net, not used in this example
 
@@ -43,26 +43,26 @@ class SimpleNN(nn.Module):
         return x
 
 model = SimpleNN(input_size=784, hidden_size=100, output_size=10)
-opt = SimpleOptimizer(model.layers, initial_lr, epochs)
-lr_scheduler_cosine = CosineLR(opt, epochs, initial_lr, final_lr)
-lr_scheduler_linear = LinearLR(opt, epochs, initial_lr, final_lr)
+opt = SimpleOptimizer(model.layers, initial_lr, num_training_steps)
+lr_scheduler_cosine = CosineLR(opt, num_training_steps, initial_lr, final_lr, num_warmup_steps=10)
+lr_scheduler_linear = LinearLR(opt, num_training_steps, initial_lr, final_lr, num_warmup_steps=10)
 lr_history_cosine = []
 lr_history_linear = []
 
-for epoch in range(epochs):
-    lr_scheduler_linear.step(epoch)
+for curr_step in range(num_training_steps):
+    lr_scheduler_linear.step(curr_step)
     lr = lr_scheduler_linear.get_lr()
     lr_history_linear.append(lr)
 
-    lr_scheduler_cosine.step(epoch)
+    lr_scheduler_cosine.step(curr_step)
     lr = lr_scheduler_cosine.get_lr()
     lr_history_cosine.append(lr)
 
-x = range(epochs)
+x = range(num_training_steps)
 plt.plot(x, lr_history_cosine, label='cosine annealing', color='blue')
 plt.plot(x, lr_history_linear, label="linear annealing", color='red')
-plt.title('Linear and Cosine Learning Rate Schedules')
-plt.xlabel('epoch')
+plt.title('Linear and Cosine Learning Rate Schedules with Warmup')
+plt.xlabel('current training step')
 plt.ylabel('learning rate')
 plt.legend()
 plt.show()

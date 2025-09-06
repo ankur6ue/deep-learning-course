@@ -16,14 +16,13 @@ import os
 import matplotlib
 import sys
 
-# The below is ugly and not recommended, but lets us run the code as a file (python -m simple_nn1.py) instead
+# The below is ugly and not recommended, but lets us run the code as a file (python -m simple_nn1_mlflow.py) instead
 # of converting it into a package..
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.linear import LinearModule
 from utils.relu import ReLUModule
 from utils.losses import CrossEntropyLossModule
 from utils.optimizer import AdamOptimizer, SimpleOptimizer
-
 # MLFlow related
 import mlflow
 from torchinfo import summary
@@ -103,6 +102,7 @@ if __name__ == "__main__":
     parser.add_argument('--capture_frames', action='store_true', help='If set, every other frame is'
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
+    parser.add_argument('--lr_scheduler', choices=['linear', 'cosine', 'constant'], default='linear')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate (default: 0.01)')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
     parser.add_argument('--batch_size', type=int, default=50, help='batch size (should divide N)')
@@ -135,14 +135,16 @@ if __name__ == "__main__":
     # Training and logging
     remote_server_uri = "http://127.0.0.1:5000"  # set to your server URI,
     mlflow.set_tracking_uri(remote_server_uri)
-    with mlflow.start_run():
+    mlflow.set_experiment("Classifying a spiral dataset using a simple NN")
+    with mlflow.start_run():  # run name generated at random by mlflow
         # 1. Log parameters
-        mlflow.log_params({"epochs": args.epochs,
-                           "learning_rate": args.lr,
-                           "batch_size": args.batch_size,
-                           "optimizer": args.optimizer,
-                           "model_type": "MLP",
-                           "hidden_units": [args.H] })
+        mlflow.log_param("epochs", args.epochs)
+        mlflow.log_param("initial learning rate", args.lr)
+        mlflow.log_param("batch size", args.batch_size)
+        mlflow.log_param("optimizer", args.optimizer)
+        mlflow.log_param("learning rate schedule", args.lr_scheduler)
+        mlflow.log_param("model type", "MLP")
+        mlflow.log_param("hidden units", args.H)
 
         c = 0  # global iteration count
         for e in range(args.epochs):
