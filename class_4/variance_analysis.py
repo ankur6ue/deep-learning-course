@@ -19,21 +19,31 @@ B = 1
 
 # Each element of X, W, b is drawn from a mean=0, var=1 normal distribution
 # Draw N samples and calculate Y. Save the Ys so we can calculate the mean and variance
-N = 1000
-Y_hist = torch.empty(n, 0)
+N = 10000
+y_hist = torch.empty(n, 0)
+a_hist = torch.empty(n, 0)
 for trials in range(0, N):
-    X = torch.randn(m, B, requires_grad=False)
-    W = torch.randn(n, m, requires_grad=False) * 1/np.sqrt(m)
-    b = torch.randn(n, B, requires_grad=False) * 1/np.sqrt(m)
+    x = torch.randn(m, B, requires_grad=False)
+    W = torch.randn(n, m, requires_grad=False)
+    b = torch.zeros(n, 1)
 
     # y is n*1
     # In Pytorch, @ means matrix multiplication, * means hadamard product
-    Y = W @ X + b
-    Y_hist = torch.cat([Y_hist, Y], dim=1)
+    y = W @ x + b
+    y_hist = torch.cat([y_hist, y], dim=1)
+    a = y.clamp(min=0)
+    a_hist = torch.cat([a_hist, a], dim=1)
 
-
-mean = Y_hist.mean(dim=1)
-var = Y_hist.var(dim=1)
+mean_y = y_hist.mean(dim=1)
+var_y = y_hist.var(dim=1)
+mean_a = a_hist.mean(dim=1)
+var_a = a_hist.var(dim=1)
+# From lecture slides, we expect mean_a = sqrt(var(y)/2pi)
+print(f'mean of first element of activation array: {mean_a[0]}')
+print(f'mean of first element of activation array from math: {np.sqrt(var_y[0]/(2*np.pi))}')
+# From lecture slides, we expect var_a approx m*var(x)*var(W)/2*(1-1/2pi)
+print(f'variance of first element of activation array: {var_a[0]}')
+print(f'variance of first element of activation array from math: {m * 1 * 1/2 * (1 - 1/(2*np.pi))}')
 print('done')
 # verify mean (n*1 vector) is close to 0
 # verify variance (n*1 vector) is close to m + 1 (1 for the bias term)

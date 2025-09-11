@@ -65,10 +65,9 @@ def draw_movie_frame(net, frame_num):
     plt.savefig(script_dir + "/frames" + "/file%04d.png" % frame_num)
 
 
-# Our simple network with one hidden layer
-class SimpleNN(nn.Module):
+# Our simple network with a few hidden layer
+class SimpleNN():
     def __init__(self, input_size, hidden_size, output_size):
-        super().__init__()
         self.relu1 = nn.ReLU()
         self.fc1 = LinearModule(input_size, hidden_size, "fc1")
         # Hidden layer
@@ -79,6 +78,9 @@ class SimpleNN(nn.Module):
         self.layers.append(self.fc1)
         self.layers.append(self.fc2)
         self.layers.append(self.fc3)
+
+    def __call__(self, x):
+        return self.forward(x)
 
     def forward(self, x):
         x = self.fc1(x)

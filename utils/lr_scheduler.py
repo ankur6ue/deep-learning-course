@@ -9,7 +9,8 @@ class LinearLR():
         self.last_step = last_step
         self.lr = initial_lr
         self.num_warmup_steps = num_warmup_steps
-        optimizer.lr = initial_lr
+        self.step(0) # if num_warmup_steps == 0, stepping will set self.ir = initial_lr, else to 0
+        optimizer.lr = self.lr
 
     def step(self, curr_step):
         if curr_step < self.num_warmup_steps:

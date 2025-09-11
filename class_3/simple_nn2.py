@@ -1,13 +1,6 @@
 import torch
-from torch import nn
 import numpy as np
-import torch.nn.functional as F
-# compute derivative of swiGLU of a vector x and compare gradient calculated by autograd against manual calculation
-# See swiGLU section in https://arxiv.org/pdf/2410.10989 and swiglue{i}.jpg for derivation of manual derivative
-# Set the seed for reproducibility
 torch.manual_seed(42)
-
-import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import argparse
@@ -23,11 +16,11 @@ from utils.losses import CrossEntropyLossModule
 from utils.optimizer import AdamOptimizer, SimpleOptimizer
 # Tensorboard related
 from torch.utils.tensorboard import SummaryWriter
-writer = SummaryWriter()
-# MLFlow related
-import mlflow
 
-# Create a spiral dataset with N points and K arms
+# We train a simple neural network to classify points on a spiral dataset. We use
+# Tensorboard to log hyperparameter values and metrics generated during training
+
+# Create a spiral dataset with N points and K arms.
 def create_dataset(K, N, D=2):
     np.random.seed(42)
     # Code to generate spiral dataset
@@ -64,10 +57,9 @@ def draw_movie_frame(net, frame_num):
     script_dir = os.path.dirname(__file__)
     plt.savefig(script_dir + "/frames" + "/file%04d.png" % frame_num)
 
-# Our simple network with one hidden layer
-class SimpleNN(nn.Module):
+# Our simple network with a few hidden layer
+class SimpleNN():
     def __init__(self, input_size, hidden_size, output_size):
-        super().__init__()
         self.relu1 = nn.ReLU()
         self.fc1 = LinearModule(input_size, hidden_size, "fc1")
         # Hidden layer
@@ -78,6 +70,9 @@ class SimpleNN(nn.Module):
         self.layers.append(self.fc1)
         self.layers.append(self.fc2)
         self.layers.append(self.fc3)
+
+    def __call__(self, x):
+        return self.forward(x)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -101,6 +96,7 @@ if __name__ == "__main__":
     parser.add_argument('--capture_frames', action='store_true', help='If set, every other frame is'
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
+    parser.add_argument('--lr_scheduler', choices=['linear', 'cosine', 'constant'], default='linear')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate (default: 0.01)')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
     parser.add_argument('--batch_size', type=int, default=50, help='batch size (should divide N)')
@@ -131,6 +127,11 @@ if __name__ == "__main__":
     else:
         optimizer = SimpleOptimizer(model.layers, learning_rate=lr)
 
+    # Tensorboard related
+    run_name = f"spiral_classification--opt={args.optimizer}_lrschd={args.lr_scheduler}_h={args.H}_B={args.batch_size}"
+    writer = SummaryWriter(f"runs/{run_name}")
+    hparam_dict = {'learning_rate_schedule': args.lr_scheduler, 'optimizer': args.optimizer, 'h': args.H, 'batch_size': args.batch_size}
+
     c = 0  # global iteration count
     for e in range(args.epochs):
         # Each epoch uses a different permutation of indices
@@ -146,9 +147,6 @@ if __name__ == "__main__":
             acc = np.mean(predicted_class == Y_.detach().numpy())
             loss_np = loss.detach().numpy()
             print(f"At iteration num {c}, Loss  = {loss_np: .4f}, Accuracy = {acc: .2f}")
-            # Write tensorboard logs
-            writer.add_scalar("Loss/train", loss_np, global_step=c)
-            writer.add_scalar("Accuracy", acc, global_step=c)
             # Calculate gradients
             loss.backward()
             # Update model parameters
@@ -158,27 +156,17 @@ if __name__ == "__main__":
                     draw_movie_frame(model, c / 2)
             optimizer.zero_grad()
             c = c + 1
-        # We'll generally calculate validation loss after each epoch and logg it..
-        # calculate validation loss
-        # writer.add_scalar("Loss/val", loss_np, e)
-        # writer.add_scalar("Accuracy", acc, e)
+        # log to tensorboard
+        writer.add_scalar("train/loss", loss_np, e)
+        writer.add_scalar("train/accuracy", acc, e)
 
     # Calculate accuracy on the entire dataset
     logits = model(X)  # Forward pass
     loss = criterion(logits, Y)
     predicted_class = np.argmax(logits.detach().numpy(), axis=0)
     acc = np.mean(predicted_class == Y.detach().numpy())
+    writer.add_hparams(hparam_dict, metric_dict={"metric/loss": loss.item(), "metric/accuracy": acc}, run_name=run_name)
     print(f"Accuracy on entire dataset = {acc: >4}")
-    hparams = {
-        'learning_rate': lr,
-        'batch_size': B,
-        'optimizer': args.optimizer
-    }
-    metrics = {
-        'hparam/accuracy': acc,
-        'hparam/loss': loss.detach().numpy()
-    }
-    writer.add_hparams(hparam_dict=hparams, metric_dict=metrics)
     # This ensures the logs are written to the disk
     writer.flush()
     print('done')

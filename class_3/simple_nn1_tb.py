@@ -23,44 +23,20 @@ from utils.linear import LinearModule
 from utils.relu import ReLUModule
 from utils.losses import MSELossModule
 from utils.optimizer import AdamOptimizer, SimpleOptimizer
+from utils.lr_scheduler import LinearLR, ConstantLR, CosineLR
 from utils.simple_nn_sinx import SimpleNN, create_dataset, draw_movie_frame
 import matplotlib.pyplot as plt
 import argparse
 import matplotlib
-from torch.utils.data import Dataset, DataLoader, RandomSampler
-
-# We train a simple neural network with 1 hidden layer to learn to predict the value of a sine function
-# We use the pytorch dataloader and sampler instead of manual sampling as in simple_nn1_mlflow.py
-
+# Tensorboard related
+from torch.utils.tensorboard import SummaryWriter
+# start tensorboard using: tensorboard --logdir runs
+# Open the URL shown (usually http://localhost:6006)
 # Set the seed for reproducibility
 torch.manual_seed(42)
 
-# Create a Pytorch Dataset out of our data
-class MyDataset(Dataset):
-    def __init__(self, X, Y):
-        # Just some dummy data: features and labels
-        self.X = X
-        self.Y = Y
-
-    def __len__(self):
-        return X.shape[1]
-
-    def __getitem__(self, idx):
-        return self.X[:,idx], self.Y[:,idx]
-
-
-def collate_columns(batch):
-    # batch is a list of tuples: [(x1, y1), (x2, y2), ...]
-    xs, ys = zip(*batch)
-    # Now xs and ys are tuples of tensors with shape [1]
-    # Convert to shape [1, 1] and then concat along dim=1
-    xs = [x.unsqueeze(0) if x.dim() == 1 else x for x in xs]
-    ys = [y.unsqueeze(0) if y.dim() == 1 else y for y in ys]
-    # Concatenate along dim=1 instead of dim=0
-    x_cat = torch.cat(xs, dim=1)
-    y_cat = torch.cat(ys, dim=1)
-    return x_cat, y_cat
-
+# We train a simple neural network with 1 hidden layer to learn to predict the value of a sine function. We use
+# Tensorboard to log hyperparameter values and metrics generated during training
 
 if __name__ == "__main__":
     # This makes plots show up as a separate figure
@@ -77,9 +53,9 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=300, help='batch size (should divide N)')
 
     args = parser.parse_args()
-    N = args.N # Number of points in the batch
+    N = args.N # Number of points in the entire dataset
     H = args.H # Size of the hidden layer
-    B = args.batch_size
+    B = args.batch_size # size of each batch used to average gradients
     lr = args.lr
     X, Y = create_dataset(N)
     # lets visualize the data:
@@ -94,12 +70,28 @@ if __name__ == "__main__":
     else:
         optimizer = SimpleOptimizer(model.layers, learning_rate=lr)
 
-    dataset = MyDataset(X, Y)
-    sampler = RandomSampler(dataset)  # samples elements randomly without replacement
-    dataloader = DataLoader(dataset, batch_size=B, sampler=sampler, collate_fn=collate_columns)
+    num_iter_per_epoch = (int)(N / args.batch_size)
+    num_steps = (int)(num_iter_per_epoch * args.epochs)
+    if args.lr_scheduler == "cosine":
+        lr_scheduler = CosineLR(optimizer, num_steps, lr, 0.001)
+    if args.lr_scheduler == "linear":
+        lr_scheduler = LinearLR(optimizer, num_steps, lr, 0.001)
+    if args.lr_scheduler == "constant":
+        lr_scheduler = ConstantLR(optimizer, num_steps, lr, 0.001)
+    loss_func_history = []
+    # Tensorboard related
+    run_name = f"opt={args.optimizer}_lrschd={args.lr_scheduler}_h={args.H}"
+    writer = SummaryWriter(f"runs/{run_name}")
+    hparam_dict = {'learning_rate_schedule': args.lr_scheduler, 'optimizer': args.optimizer, 'h': args.H}
+
     c = 0 # global iteration count
     for e in range(args.epochs):
-        for batch_idx, (X_, Y_) in enumerate(dataloader):
+        # Each epoch uses a different permutation of indices
+        indices = torch.randperm(N)
+        for iter in range(num_iter_per_epoch):
+            batch_indices = indices[iter*B: (iter+1)*B]
+            X_ = X[:, batch_indices]
+            Y_ = Y[:, batch_indices]
             o = model(X_)    # Forward pass
             loss = criterion(o, Y_)
             if args.capture_frames:
@@ -108,20 +100,28 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+            lr_scheduler.step(c)
+            loss_func_history.append(loss.item())
             c = c + 1
         # print loss after every epoch
         print(f"After Epoch {e}, Loss  = {loss.item(): .4f}")
+        # .item extracts the value from a single element tensor,
+        # converting it into a python number
+        # Write tensorboard logs
+        writer.add_scalar("train/loss", loss.item(), e)
 
-    print('done')
-
+    writer.add_hparams(hparam_dict, metric_dict={"metric/loss":loss.item()}, run_name=run_name)
     # generate test data
     x_test = torch.linspace(-2 * np.pi, 2 * np.pi, 300)
     X = torch.tensor(x_test.unsqueeze(1), dtype=torch.float32).unsqueeze(1)
-
-    y_pred = model(X.T).squeeze().detach().numpy()
+    y_pred = model(X.T).detach().squeeze().numpy()
     plt.plot(x_test, y_pred, color='red', label="NN Approximation")
     plt.plot(x_test, np.sin(x_test), color='green', linestyle='--', label="True sin(x)")
     plt.title("Neural Network Approximating sin(x)")
     plt.legend()
     plt.grid(True)
     plt.show()
+    plt.plot(range(0,c), loss_func_history, color='red', label="Loss function progression")
+    plt.title("Progression of the loss function")
+    plt.legend()
+    print('done')
