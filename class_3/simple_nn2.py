@@ -151,7 +151,7 @@ if __name__ == "__main__":
             loss.backward()
             # Update model parameters
             optimizer.step()
-            if args.capture_frames:
+            if 1: # args.capture_frames:
                 if c % 2 == 0:
                     draw_movie_frame(model, c / 2)
             optimizer.zero_grad()
