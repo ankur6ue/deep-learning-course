@@ -31,7 +31,7 @@ class MSELossFn(torch.autograd.Function):
         # Save the input for the backward pass (for gradient calculation)
         ctx.save_for_backward(y, g)
         B = y.size(1)
-        return torch.matmul((y-g), (y-g).T)/B
+        return torch.mean((y-g) ** 2)/B # mean operates over both dimensions.. vector and batch.
 
     @staticmethod
     def backward(ctx, grad_output):

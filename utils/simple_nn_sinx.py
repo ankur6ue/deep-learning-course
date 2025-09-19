@@ -19,9 +19,9 @@ def create_dataset(N):
 
 
 class SimpleNN():
-    def __init__(self, input_size, hidden_size, output_size):
-        self.fc1 = LinearModule(input_size, hidden_size, "fc1", 1)
-        self.fc2 = LinearModule(hidden_size, output_size, "fc2", 1)
+    def __init__(self, input_size, hidden_size, output_size, scale=1):
+        self.fc1 = LinearModule(input_size, hidden_size, "fc1", scale)
+        self.fc2 = LinearModule(hidden_size, output_size, "fc2", scale)
         self.relu = ReLUModule()  # Activation function
         self.layers = []
         self.layers.append(self.fc1)

@@ -1,5 +1,8 @@
 import torch
 import numpy as np
+
+from DL_Course.utils.losses import MSELossModule
+
 torch.manual_seed(42)
 import torch.nn as nn
 import matplotlib.pyplot as plt
@@ -12,8 +15,9 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.linear import LinearModule
 from utils.relu import ReLUModule
-from utils.losses import CrossEntropyLossModule
+from utils.losses import CrossEntropyLossModule, MSELossModule
 from utils.optimizer import AdamOptimizer, SimpleOptimizer
+from utils.softmax import SoftmaxModule
 # Tensorboard related
 from torch.utils.tensorboard import SummaryWriter
 
@@ -100,10 +104,10 @@ if __name__ == "__main__":
     parser.add_argument('--capture_frames', action='store_true', help='If set, every other frame is'
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
-    parser.add_argument('--lr_scheduler', choices=['linear', 'cosine', 'constant'], default='linear')
-    parser.add_argument('--lr', type=float, default=0.01, help='learning rate (default: 0.01)')
+    parser.add_argument('--lr_scheduler', choices=['linear', 'cosine', 'constant'], default='constant')
+    parser.add_argument('--lr', type=float, default=0.02, help='learning rate (default: 0.01)')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
-    parser.add_argument('--batch_size', type=int, default=50, help='batch size (should divide N)')
+    parser.add_argument('--batch_size', type=int, default=200, help='batch size (should divide N)')
 
     args = parser.parse_args()
     N = args.N # Number of points per class. The size of the dataset then will be K*N
@@ -114,6 +118,8 @@ if __name__ == "__main__":
     lr = args.lr # Learning rate
 
     X_, Y_ = create_dataset(K, N) # B * N
+    # convert Y_ (true labels) into one-hot vectors
+    one_hot_targets_np = np.eye(K)[Y_]
     # lets visualize the data:
     plt.scatter(X_[:, 0], X_[:, 1], c=Y_, s=40, cmap=plt.cm.Spectral)
     plt.show()
@@ -122,17 +128,20 @@ if __name__ == "__main__":
     # convert to tensors
     Y = torch.from_numpy(Y_)
     Y = Y.unsqueeze(1).T # (N*K * 1) Add an extra dimension. Needed for matrix math to work
+    one_hot_targets = torch.from_numpy(one_hot_targets_np).T
     # create the model
     model = SimpleNN(D, H, K)
-    # We use cross entropy loss, because our network is predicting the class of each point
-    criterion = CrossEntropyLossModule()
+    # We use MSE loss as an experiment
+    criterion = MSELossModule()
+    softmax = SoftmaxModule()
     if args.optimizer == "adam":
         optimizer = AdamOptimizer(model.layers, learning_rate=lr)
     else:
         optimizer = SimpleOptimizer(model.layers, learning_rate=lr)
 
     # Tensorboard related
-    run_name = f"spiral_classification--opt={args.optimizer}_lrschd={args.lr_scheduler}_h={args.H}_B={args.batch_size}"
+    run_name = (f"spiral_classification--opt={args.optimizer}_lrschd={args.lr_scheduler}_loss_func=MSE_h={args.H}_B"
+                f"={args.batch_size}")
     writer = SummaryWriter(f"runs/{run_name}")
     hparam_dict = {'learning_rate_schedule': args.lr_scheduler, 'optimizer': args.optimizer, 'h': args.H, 'batch_size': args.batch_size}
 
@@ -145,8 +154,11 @@ if __name__ == "__main__":
             batch_indices = indices[iter * B: (iter + 1) * B]
             X_ = X[:, batch_indices] # K, B
             Y_ = Y[:, batch_indices] # K, B
+            one_hot_targets_batch = one_hot_targets[:, batch_indices]
             logits = model(X_)  # Forward pass. logits are size K, B
-            loss = criterion(logits, Y_)
+            # apply softmax
+            probs = softmax(logits)
+            loss = criterion(probs, one_hot_targets_batch)
             predicted_class = np.argmax(logits.detach().numpy(), axis=0)
             acc = np.mean(predicted_class == Y_.detach().numpy())
             loss_np = loss.detach().numpy()
@@ -155,7 +167,7 @@ if __name__ == "__main__":
             loss.backward()
             # Update model parameters
             optimizer.step()
-            if 1: # args.capture_frames:
+            if args.capture_frames:
                 if c % 2 == 0:
                     draw_movie_frame(model, c / 2)
             optimizer.zero_grad()
