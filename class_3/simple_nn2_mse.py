@@ -18,6 +18,8 @@ from utils.relu import ReLUModule
 from utils.losses import CrossEntropyLossModule, MSELossModule
 from utils.optimizer import AdamOptimizer, SimpleOptimizer
 from utils.softmax import SoftmaxModule
+import torch.nn.functional as F
+
 # Tensorboard related
 from torch.utils.tensorboard import SummaryWriter
 
@@ -105,7 +107,7 @@ if __name__ == "__main__":
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
     parser.add_argument('--lr_scheduler', choices=['linear', 'cosine', 'constant'], default='constant')
-    parser.add_argument('--lr', type=float, default=0.02, help='learning rate (default: 0.01)')
+    parser.add_argument('--lr', type=float, default=0.01, help='learning rate (default: 0.01)')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
     parser.add_argument('--batch_size', type=int, default=200, help='batch size (should divide N)')
 
@@ -134,6 +136,7 @@ if __name__ == "__main__":
     # We use MSE loss as an experiment
     criterion = MSELossModule()
     softmax = SoftmaxModule()
+    # softmax_pt = softmax_module_pt() # to compare our softmax against pytorch's
     if args.optimizer == "adam":
         optimizer = AdamOptimizer(model.layers, learning_rate=lr)
     else:

@@ -7,8 +7,8 @@ class SoftmaxFn(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x):
         exp_scores = torch.exp(x)
-        # we are using columns are the batch dimension
-        probs = exp_scores / torch.sum(exp_scores, axis=1, keepdims=True)
+        # sum along columns, the vector dimension
+        probs = exp_scores / torch.sum(exp_scores, axis=0, keepdims=True)
         # Save for use in the backward pass (for gradient calculation)
         ctx.save_for_backward(probs)
         return probs

@@ -1,3 +1,18 @@
+# Copyright 2025 Ankur Mohan
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+# documentation files (the “Software”), to deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
+# and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+# Software.
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+# THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+from torch import nn
+import numpy as np
 import torch
 import numpy as np
 torch.manual_seed(42)
@@ -132,7 +147,8 @@ if __name__ == "__main__":
         optimizer = SimpleOptimizer(model.layers, learning_rate=lr)
 
     # Tensorboard related
-    run_name = f"spiral_classification--opt={args.optimizer}_lrschd={args.lr_scheduler}_h={args.H}_B={args.batch_size}"
+    run_name = (f"spiral_classification--opt={args.optimizer}_lrschd={args.lr_scheduler}_loss_func=x-entropy_h"
+                f"={args.H}_{args.batch_size}")
     writer = SummaryWriter(f"runs/{run_name}")
     hparam_dict = {'learning_rate_schedule': args.lr_scheduler, 'optimizer': args.optimizer, 'h': args.H, 'batch_size': args.batch_size}
 
@@ -155,7 +171,7 @@ if __name__ == "__main__":
             loss.backward()
             # Update model parameters
             optimizer.step()
-            if 1: # args.capture_frames:
+            if args.capture_frames:
                 if c % 2 == 0:
                     draw_movie_frame(model, c / 2)
             optimizer.zero_grad()
