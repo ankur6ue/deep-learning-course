@@ -3,103 +3,176 @@ from torch import nn
 
 
 class CrossEntropyLossFn(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, y, labels):
-        # Save the input for the backward pass (for gradient calculation)
-        sum_exp_scores = torch.sum(torch.exp(y), dim=0)
-        # internally pytorch uses log probs for numerical stability.. so we'll also do that
-        # probs = exp_scores / torch.sum(exp_scores, dim=0, keepdims=True)
-        log_probs = y - torch.log(sum_exp_scores)
-        ctx.save_for_backward(log_probs, labels)
-        B = y.size(1)
-        # Below assumes that labels are one hot vectors, so we are simply indexing the probs array at the non-zero index
-        # and summing across the batch
-        return -torch.sum(log_probs[(labels.int(), range(0, B))])/B
+    """
+    A custom cross-entropy loss (logits + index labels), matching the common
+    "softmax + NLL" formulation, with numerical stability via log-sum-exp.
+
+    Expected shapes (column-major batches):
+        - y:      (C, B) float tensor of logits (C = #classes, B = batch size)
+        - labels: (B,)   int64 tensor of class indices in [0, C-1]
+
+    Returns:
+        - Scalar tensor: mean cross-entropy over the batch.
+
+    Notes:
+        - We compute log-probabilities as: log_probs = y - logsumexp(y, dim=0).
+        - The loss is: L = -(1/B) * sum_b log_probs[labels[b], b]
+        - Backward returns dL/dy (shape (C,B)) and None for labels.
+    """
 
     @staticmethod
-    def backward(ctx, grad_output):
-        # Retrieve the saved input from the forward pass
+    def forward(ctx, y: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        # Stable log-softmax along class dimension (rows), per column (sample).
+        logsumexp = torch.logsumexp(y, dim=0, keepdim=True)  # (1, B)
+        log_probs = y - logsumexp                            # (C, B)
+
+        # Save for backward
+        ctx.save_for_backward(log_probs, labels)
+
+        B = y.size(1)
+        # Gather log-probs at target indices and average (negative log-likelihood)
+        loss = -log_probs[labels.long(), torch.arange(B, device=y.device)].mean()
+        return loss
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
         log_probs, labels = ctx.saved_tensors
-        probs = torch.exp(torch.clone(log_probs))
+        probs = log_probs.exp()                     # (C, B)
         B = probs.size(1)
-        probs[[labels.int(), range(0, B)]] -= 1
-        return probs/B, torch.zeros(labels.size())
+
+        # dL/d(logits) = (probs - one_hot) / B; scale by grad_output (scalar)
+        probs[labels.long(), torch.arange(B, device=probs.device)] -= 1.0
+        grad_y = (probs / B) * grad_output
+        return grad_y, None  # no gradient for labels
 
 
 class MSELossFn(torch.autograd.Function):
+    """
+    Mean Squared Error (MSE) loss over all elements of (C, B) tensors.
+
+    Expected shapes:
+        - y: (C, B) predictions
+        - g: (C, B) ground-truth
+
+    Returns:
+        - Scalar tensor: mean((y - g)^2) over both dimensions.
+
+    Backward:
+        - dL/dy = (2/(C*B)) * (y - g) * grad_output
+        - dL/dg = None (no gradient needed by default for targets)
+    """
+
     @staticmethod
-    def forward(ctx, y, g):
-        # y: output of the net
-        # g: groundtruth
-        # Save the input for the backward pass (for gradient calculation)
+    def forward(ctx, y: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         ctx.save_for_backward(y, g)
-        return torch.mean((y-g) ** 2) # mean operates over both dimensions.. vector and batch.
+        return torch.mean((y - g) ** 2)
 
     @staticmethod
-    def backward(ctx, grad_output):
-        # Retrieve the saved input from the forward pass
-        # If the forward function operates on n inputs the number of outputs in the corresponding backward function must
-        # also be n (assuming all inputs require gradients)
+    def backward(ctx, grad_output: torch.Tensor):
         y, g = ctx.saved_tensors
-        sz = y.size(0)
-        B = y.size(1)
-        return 2*(y - g)/(sz*B), torch.zeros(g.size())
+        C, B = y.shape
+        scale = 2.0 / (C * B)
+        grad_y = scale * (y - g) * grad_output
+        return grad_y, None
 
-class FusedXEntropyMSELossFn(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, y, labels):
-        # element wise product, then sum along columns
-        exp_logits = torch.exp(y)
-        probs = exp_logits / torch.sum(exp_logits, dim=0, keepdims=True)
-        sum_sq_probs = torch.sum(probs * probs, dim=0, keepdim=True)
-        # element wise product, then sum along columns
-        sum_prob_labels = torch.sum(probs * labels, dim=0, keepdim=True)
-        # notice the trade-off between memory consumed and computation..
-        # we can calculate probs, sum_sq_probs etc from y and labels.. but we can avoid that computation at the
-        # expense of saving more tensors, and consuming more memory
-        ctx.save_for_backward(y, probs, labels, sum_sq_probs, sum_prob_labels)
-        ctx.sum_prob_labels = sum_prob_labels
-        ctx.sum_sq_probs = sum_sq_probs
-        return torch.mean((probs-labels) ** 2)
+
+class FusedSoftmaxMSELossFn(torch.autograd.Function):
+    """
+    MSE between softmax(logits) and target probabilities, with an efficient
+    backward (no explicit Jacobian materialization).
+
+    Expected shapes (column-major batches):
+        - logits:       (C, B) float tensor (pre-softmax)
+        - target_probs: (C, B) float tensor (each column sums to 1)
+
+    Returns:
+        - Scalar tensor: mean( (softmax(logits) - target_probs)^2 )
+
+    Backward:
+        Let p = softmax(logits), g = 2*(p - t)/(C*B). For each column b:
+            dL/d(logits)_b = J_p(z_b) @ g_b
+                           = g_b - p_b * (p_b^T g_b)
+        Implemented as a vectorized column-wise operation.
+    """
 
     @staticmethod
-    def backward(ctx, grad_output):
-        # Retrieve the saved input from the forward pass
-        y, probs, labels, sum_sq_probs, sum_prob_labels = ctx.saved_tensors
-        B = probs.size(1)
-        K = probs.size(0)
-        # When probs and labels are N*B and sum_sq_probs and sum_prob_labels are 1*B, they'll be broadcasted along B
-        # dimension
-        return 2 * probs * (probs - labels - sum_sq_probs + sum_prob_labels)/(K * B), torch.zeros(labels.size())
+    def forward(ctx, logits: torch.Tensor, target_probs: torch.Tensor) -> torch.Tensor:
+        # Softmax across classes (rows) for each column (sample)
+        exp_logits = torch.exp(logits)
+        probs = exp_logits / exp_logits.sum(dim=0, keepdim=True)
+
+        # Save tensors needed for backward
+        ctx.save_for_backward(probs, target_probs)
+
+        # Mean MSE over all elements
+        loss = torch.mean((probs - target_probs) ** 2)
+        return loss
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        probs, target_probs = ctx.saved_tensors
+        C, B = probs.shape
+
+        # Upstream gradient for MSE wrt probs: 2*(p - t)/(C*B)
+        g = (2.0 / (C * B)) * (probs - target_probs)
+
+        # Jacobian-vector product for softmax along columns:
+        # J @ g = p * g - p * (sum_j p_j * g_j)  (computed per column, becomes the dot product between p_j and g_j)
+        dot = (probs * g).sum(dim=0, keepdim=True)  # (1, B)
+        grad_logits = probs * g - probs * dot
+
+        # Scale by incoming scalar grad_output
+        grad_logits = grad_logits * grad_output
+
+        return grad_logits, None
 
 class CrossEntropyLossModule(nn.Module):
+    """
+    nn.Module wrapper for CrossEntropyLossFn.
+
+    Forward:
+        y:      (C, B) logits
+        labels: (B,)   int64 class indices
+        returns scalar mean cross-entropy
+    """
+
     def __init__(self):
         super().__init__()
 
-    def forward(self, y, labels):
-
+    def forward(self, y: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         return CrossEntropyLossFn.apply(y, labels)
 
-class FusedXEntropyMSELossModule(nn.Module):
+
+class FusedSoftmaxMSELossModule(nn.Module):
+    """
+    nn.Module wrapper for FusedSoftmaxMSELossFn.
+
+    Forward:
+        y:      (C, B) logits
+        labels: (C, B) target probabilities (columns sum to 1)
+        returns scalar mean MSE between softmax(y) and labels
+    """
+
     def __init__(self):
         super().__init__()
 
-    def forward(self, y, labels):
-        return FusedXEntropyMSELossFn.apply(y, labels)
+    def forward(self, y: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        return FusedSoftmaxMSELossFn.apply(y, labels)
 
 
 class MSELossModule(nn.Module):
+    """
+    nn.Module wrapper for MSELossFn.
+
+    Forward:
+        y:      (C, B) predictions
+        labels: (C, B) targets
+        returns scalar mean squared error
+    """
+
     def __init__(self):
         super().__init__()
 
-    def forward(self, y, labels):
-        return MSELossFn.apply(y, labels)
-
-
-class MSELossModule(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, y, labels):
+    def forward(self, y: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         return MSELossFn.apply(y, labels)
 

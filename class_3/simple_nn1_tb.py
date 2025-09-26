@@ -38,17 +38,21 @@ torch.manual_seed(42)
 # We train a simple neural network with 1 hidden layer to learn to predict the value of a sine function. We use
 # Tensorboard to log hyperparameter values and metrics generated during training
 
+# For this example, while using the simple optimizer, the learning rate must be no higher than 0.005, otherwise
+# the optimization doesn't converge..for simple optimizer, constant learning rate schedule works better
+# than linear or cosine.
 if __name__ == "__main__":
     # This makes plots show up as a separate figure
     matplotlib.use('TkAgg')
     parser = argparse.ArgumentParser(description='Train a simple neural network to model a sine function')
     parser.add_argument('--N', type=int, default=600, help='Number of points in the sine wave')
-    parser.add_argument('--H', type=int, default=150, help='Size of hidden layer')
+    parser.add_argument('--H', type=int, default=100, help='Size of hidden layer')
     parser.add_argument('--capture_frames', action='store_true', help='If set, every other frame is'
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
     parser.add_argument('--lr_scheduler', choices=['linear', 'cosine', 'constant'], default='linear')
-    parser.add_argument('--lr', type=float, default=0.07, help='learning rate (default: 0.07)')
+    parser.add_argument('--non_linearity', choices=['relu', 'tanh', 'leakyrelu', 'swish'], default='swish')
+    parser.add_argument('--lr', type=float, default=0.01, help='learning rate (default: 0.07)')
     parser.add_argument('--epochs', type=int, default=500, help='number of epochs')
     parser.add_argument('--batch_size', type=int, default=300, help='batch size (should divide N)')
 
@@ -63,7 +67,7 @@ if __name__ == "__main__":
     Y = Y.T # 1 * B
     X.requires_grad = True
     # create the model
-    model = SimpleNN(1, H, 1)
+    model = SimpleNN(1, H, 1, args.non_linearity)
     criterion = MSELossModule()
     if args.optimizer == "adam":
         optimizer = AdamOptimizer(model.layers, learning_rate=lr)
@@ -80,7 +84,7 @@ if __name__ == "__main__":
         lr_scheduler = ConstantLR(optimizer, num_steps, lr, 0.001)
     loss_func_history = []
     # Tensorboard related
-    run_name = f"opt={args.optimizer}_lrschd={args.lr_scheduler}_h={args.H}"
+    run_name = f"opt={args.optimizer}_lrschd={args.lr_scheduler}_h={args.H}_{args.non_linearity}"
     writer = SummaryWriter(f"runs/{run_name}")
     hparam_dict = {'learning_rate_schedule': args.lr_scheduler, 'optimizer': args.optimizer, 'h': args.H}
 

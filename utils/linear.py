@@ -31,9 +31,9 @@ class LinearModule(nn.Module):
         # Need to set a scale for class_2/simple_nn1_mlflow.py example, when Simple Optimizer is being used
         # We implement the matrix mul in a linear layer as Wx + b, so the second dimension of W must match the input
         # to the layer
-        self.weight = torch.randn(_out, _in) * np.sqrt(2 / _in) * scale
-        self.bias = torch.randn(_out, 1) * np.sqrt(1 / _in) * scale
-        self.bias = torch.zeros(_out, 1)
+        self.weight = torch.randn(_out, _in) * np.sqrt(1 / _in) * scale
+        self.bias = torch.randn(_out, 1) * np.sqrt(1 / _in)
+        # self.bias = torch.zeros(_out, 1)
         self.weight.requires_grad = True
         self.bias.requires_grad = True
         self.name = name

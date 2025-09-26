@@ -15,7 +15,7 @@ import numpy as np # linear algebra
 import matplotlib.pyplot as plt
 
 # This program calculates the derivative of a function using first principles and compares it against the exact value of the derivative
-# for different values of \delta. As delta increases, the calculated value of the derivative becomes less accurage
+# for different values of \delta. As delta increases, the calculated value of the derivative becomes less accurate
 x = 1
 n = 2
 def f(x, n):
@@ -33,5 +33,20 @@ for delta_x in np.arange(0.0001, 1, 0.05):
     df_manual_list.append(df_dx_manual)
     df_manual_list.append(df_dx_manual)
     print(f"delta_x: {delta_x: .2f}, derivative: {df_dx_manual: .2f}")
+
+
+# derivative of sin(x)/log(x) at x = 0.5
+# f'(x) = x^2 log(x)cos(x) - x sin(x)
+def f(x):
+    return np.sin(x)/np.log(x)
+
+def df_dx(x):
+    return (np.cos(x) * np.log(x) - np.sin(x)/x)/(np.log(x) ** 2)
+
+x = 0.5
+delta_x = 0.0001
+df_dx_manual = (f(x + delta_x) - f(x))/delta_x
+df_dx_exact = df_dx(x)
+print(f"df_dx (manual): {df_dx_manual: .4f}, df_dx (exact): {df_dx_exact: .4f}")
 
 

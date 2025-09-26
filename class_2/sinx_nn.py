@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 # 1. Generate training data
 np.random.seed(0)
-x_np = np.linspace(-2 * np.pi, 2 * np.pi, 200)
+x_np = np.linspace(-2 * np.pi, 2 * np.pi, 600)
 y_np = np.sin(x_np) + 0.1 * np.random.randn(*x_np.shape)  # noisy sin(x)
 
 x_train = torch.tensor(x_np, dtype=torch.float32).unsqueeze(1)
@@ -31,10 +31,10 @@ model = SimpleNN(hidden_dim=100)
 
 # 3. Loss function and optimizer
 criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.01)
+optimizer = optim.SGD(model.parameters(), lr=0.01)
 
 # 4. Training loop
-epochs = 2000
+epochs = 500
 for epoch in range(epochs):
     model.train()
     optimizer.zero_grad()
@@ -43,7 +43,7 @@ for epoch in range(epochs):
     loss.backward()
     optimizer.step()
 
-    if epoch % 100 == 0:
+    if epoch % 2 == 0:
         print(f"Epoch {epoch}: Loss = {loss.item():.4f}")
 
 # 5. Plot predictions

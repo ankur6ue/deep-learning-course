@@ -18,7 +18,7 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.softmax import SoftmaxModule
-from utils.losses import CrossEntropyLossModule, MSELossModule, FusedXEntropyMSELossModule
+from utils.losses import CrossEntropyLossModule, MSELossModule, FusedSoftmaxMSELossModule
 import torch.nn.functional as F
 
 # Verify that our calculation of derivatives for x-entropy loss and softmax match pytorch's
@@ -59,7 +59,7 @@ if are_equal:
     print("Our calculation of derivative of softmax + MSE loss matches that of Pytorch")
 # Try our fusedxentropymse loss..
 X.grad.zero_()
-fused_xentropy_mse = FusedXEntropyMSELossModule()
+fused_xentropy_mse = FusedSoftmaxMSELossModule()
 fused_xentropy_mse_loss = fused_xentropy_mse(logits, Y)
 fused_xentropy_mse_loss.backward()
 X_grad_clone = X.grad.clone()

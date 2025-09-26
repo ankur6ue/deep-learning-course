@@ -6,6 +6,10 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.linear import LinearModule
 from utils.relu import ReLUModule
+from utils.leakyrelu import LeakyReLUModule
+from utils.tanh import TanhModule
+from utils.gelu import GeluModule
+from utils.swish import SwishModule
 
 # Create our spiral dataset
 def create_dataset(N):
@@ -19,10 +23,19 @@ def create_dataset(N):
 
 
 class SimpleNN():
-    def __init__(self, input_size, hidden_size, output_size, scale=1):
+    def __init__(self, input_size, hidden_size, output_size, non_linearity, scale=1):
         self.fc1 = LinearModule(input_size, hidden_size, "fc1", scale)
         self.fc2 = LinearModule(hidden_size, output_size, "fc2", scale)
-        self.relu = ReLUModule()  # Activation function
+
+        if non_linearity == "leaky_relu":
+            self.non_linearity = LeakyReLUModule()
+        elif non_linearity == "tanh":
+            self.non_linearity = TanhModule()
+        elif non_linearity == "swish":
+            self.non_linearity = SwishModule()
+        else: # default is ReLU
+            self.non_linearity = ReLUModule()
+
         self.layers = []
         self.layers.append(self.fc1)
         self.layers.append(self.fc2)
@@ -33,7 +46,7 @@ class SimpleNN():
 
     def forward(self, x):
         x = self.fc1(x)
-        x = self.relu(x)
+        x = self.non_linearity(x)
         x = self.fc2(x)
         return x
 
