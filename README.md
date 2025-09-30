@@ -6,9 +6,8 @@
 - Overview of course roadmap
 
 ### Lecture 1.2: Mathematical Preliminaries
-
-- Optimization
 - Univariate differential calculus
+- Optimization
 - Gradient descent 
 
 ### Lecture 1.3: Mathematical Preliminaries

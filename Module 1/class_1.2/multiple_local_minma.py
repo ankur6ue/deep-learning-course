@@ -20,14 +20,16 @@ import matplotlib.pyplot as plt
 
 def f(x):
     return np.sin(x) + 0.5 * np.cos(2 * x) + 0.1 * x**2
+    # return x ** 4 - 3 * x ** 2 + 2
 
 def df_dx(x):
     # For f(x) = x^2 + 2x + 1, the derivative is 2x + 2
     return np.cos(x) - np.sin(2*x) + 0.2*x
+    # return 4 * x ** 3 - 6 * x
 
 # Generate x-values for the plot
 x = np.linspace(-5, 5, 500)  # Adjust the range and number of points as needed
-
+# x = np.linspace(-2, 2, 500)
 # Calculate corresponding y-values
 y = f(x)
 # calculate the derivative
@@ -35,6 +37,7 @@ y_prime = df_dx(x)
 # Plot the function and the derivative
 plt.figure(figsize=(8, 6))
 plt.plot(x, y, label='f(x)=sin(x) + 0.5cos(2x) + 0.1x^2')
+# plt.plot(x, y, label='f(x)=x ** 4 - 3 * x ** 2 + 2')
 plt.plot(x, y_prime, label="f'(x) = cos(x) - sin(2x) + 0.2x", color='red', linestyle='--')
 plt.xlabel('x')
 plt.ylabel('f(x)')

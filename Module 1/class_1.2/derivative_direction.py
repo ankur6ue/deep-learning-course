@@ -11,42 +11,40 @@
 # TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import numpy as np # linear algebra
+import numpy as np
 import matplotlib.pyplot as plt
 
-# This program calculates the derivative of a function using first principles and compares it against the exact value of the derivative
-# for different values of \delta. As delta increases, the calculated value of the derivative becomes less accurate
-x = 1
-n = 2
-def f(x, n):
-    return x**n
-
-def df_dx(x, n):
-    return n*x^(n-1)
-
-# f(x) = x^n
-# f'(x) = nx^(n-1)
-dfdx = df_dx(x, n)
-df_manual_list = []
-for delta_x in np.arange(0.0001, 1, 0.05):
-    df_dx_manual = (f(x + delta_x, n) - f(x, n))/delta_x
-    df_manual_list.append(df_dx_manual)
-    df_manual_list.append(df_dx_manual)
-    print(f"delta_x: {delta_x: .2f}, derivative: {df_dx_manual: .2f}")
-
-
-# derivative of sin(x)/log(x) at x = 0.5
-# f'(x) = x^2 log(x)cos(x) - x sin(x)
+# Define function and derivative
 def f(x):
-    return np.sin(x)/np.log(x)
+    return (x - 3)**2
 
-def df_dx(x):
-    return (np.cos(x) * np.log(x) - np.sin(x)/x)/(np.log(x) ** 2)
+def f_prime(x):
+    return 2*(x - 3)
 
-x = 0.5
-delta_x = 0.0001
-df_dx_manual = (f(x + delta_x) - f(x))/delta_x
-df_dx_exact = df_dx(x)
-print(f"df_dx (manual): {df_dx_manual: .4f}, df_dx (exact): {df_dx_exact: .4f}")
+# Range for plotting
+x = np.linspace(-1, 7, 400)
+y = f(x)
 
+# Pick some starting points
+points = [0.5, 2, 4.5, 6]
 
+plt.figure(figsize=(8,6))
+plt.plot(x, y, label=r'$f(x) = (x-3)^2$')
+plt.axvline(3, color='k', linestyle='--', label='Global minimum at x=3')
+
+# Show derivative direction at selected points
+for p in points:
+    slope = f_prime(p)
+    direction = -np.sign(slope)  # opposite of slope is direction to move
+    plt.scatter(p, f(p), color='red')
+    plt.annotate(f"f'={slope:.1f}\nmove {'→' if direction>0 else '←'}",
+                 (p, f(p)),
+                 textcoords="offset points", xytext=(0,15), ha='center',
+                 color='blue',  fontsize=12, fontweight='bold')
+
+plt.title("Derivative sign points toward the global minimum")
+plt.xlabel("x")
+plt.ylabel("f(x)")
+plt.legend()
+plt.grid(True)
+plt.show()
