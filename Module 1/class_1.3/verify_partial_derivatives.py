@@ -22,7 +22,8 @@
 
 import numpy as np
 
-## Part 1: for h = sin(x*y)
+## Part 1: for h = sin(x*y), we calculate partial derivatives wrt x and y using central finite difference and compare it
+## with analytical solution
 def h(x, y):
     return np.sin(x*y)
 
@@ -40,7 +41,9 @@ dh_dy_num = (h(x, y+eps)-h(x, y-eps))/(2*eps)
 print("∂h/∂x analytical:", dh_dx(x,y), "numerical:", dh_dx_num)
 print("∂h/∂y analytical:", dh_dy(x,y), "numerical:", dh_dy_num)
 
-## Part 2: y = a^T x
+## Part 2: We do the same for y = a^T x. y is a scalar, a and x are vectors. We calculate derivative`wrt a and x using
+## central finite difference and compare it with analytical solution
+
 def dot_forward(a: np.ndarray, x: np.ndarray) -> float:
     """Forward: y = a^T x"""
     return float(a @ x)
