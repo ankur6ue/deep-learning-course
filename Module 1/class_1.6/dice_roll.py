@@ -11,40 +11,7 @@
 # TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 import numpy as np
-import matplotlib.pyplot as plt
-# Now let's calculate KL distance between z1 = x + y when x and y are IID, and z2 = x + y when x and y are entangled.
-# Def: KL_z2z1= sum p(z2) * (log(p(z2)) - log(p(z1)))
-p_z1 = np.array([1,1,1,1,1,1])/6
-p_z2 = np.array([1/8, 1/8, 3/16, 3/16, 3/16, 3/16])
-KL_z2z1 = 0
-KL_z1z2 = 0
-for i in range(0,len(p_z1)):
-    KL_z2z1 += p_z2[i] * (np.log(p_z2[i]) - np.log(p_z1[i]))
-    KL_z1z2 += p_z1[i] * (np.log(p_z1[i]) - np.log(p_z2[i]))
-# Note KL_z1z2 != KL_z2z1
 
-# p_X is the prob distribution of a fair coin
-p_X = np.array([1,1])/2
-N = 100
-# We are going to vary the heads probability of a biased coin (Y), and compute KL and MSE distance between X and Y
-ph = np.linspace(0.001, 0.99, N)
-KL_xy = [] # KL
-d_xy = []  # MSE
-for h_ in ph:
-    KL_xy.append(p_X[0] * (np.log(p_X[0]) - np.log(h_)) + (1 - p_X[0]) * (np.log(1-p_X[0]) - np.log(1-h_)))
-    d_xy.append(0.5*(p_X[0] - h_)**2 + 0.5*(1-p_X[0] - (1-h_))**2)
-
-plt.plot(ph, KL_xy, label='KL(x,y)', color='blue')
-plt.plot(ph, d_xy, label='d(x,y)', color='red')
-plt.title('KL distance and Mean Square Error between \n RVs X (unbiased coin), Y (biased coin)')
-plt.xlabel('p(Y=Heads)')
-plt.legend()
-plt.show()
-KL_xy = []
-plt.xlabel('current training step')
-plt.ylabel('learning rate')
-plt.legend()
-plt.show()
 # We have two unbiased dice with 4 faces. Random variable x represents the outcome of rolling the first dice,
 # y represents rolling the second dice. x and y are discreet random variables, with 4 possible outcomes (1,2,3,4)
 # each with probability 1/4. The joint distribution of x,y p(x=i,y=j) = p(i)p(j) = 1/16, for i and j in {1,2,3,4)
@@ -64,6 +31,7 @@ E_y = E_x # The two dice are identical, so x and y are independent and identical
 E_y_sq = E_x_sq
 Var_y = Var_x
 
+# Part 1
 # Now let's consider a random variable z = x + y. Let's calculate the mean and variance of z manually, and confirm
 # it matches the formula
 ####################
@@ -105,12 +73,13 @@ for i in range(0, num_trials):
     z = x + y
     z_hist.append(z)
 
-E_z_sim = np.mean(z_hist)
+E_z_sim = np.mean(z_hist) # simulated value of E_z
 Var_z_sim = np.var(z_hist)
 # verify E_z_sim is close to E_z
 # verify Var_z_sim is close to Var_z
 # plot histogram of z_hist and compare with the distribution calculated above
 
+# Part 2:
 # Now suppose z=xy. z can take values from 1-16.
 # 1: 1,1
 # 2: (1,2), (2,1)
@@ -143,13 +112,14 @@ test = E_x_sq * E_y_sq - E_z ** 2
 # verify E_xy = E_x * E_y
 # verify Var_xy = E_x_sq * E_y_sq - (E_xy)^2
 
+# Part 3:
 # Now let's consider non-independent (but identically distributed) x and y. Suppose our dice are "quantum entangled",
 # so that when
 # one dice rolls 1, the other also rolls 1.
 # The joint distribution is now more complicated..
 # when (i,j) in (1,1), p(x=i,y=j) = 1/4. (1,2) (1,3) etc are not possible
 # For (i,j) in {2,3,4), p(x=i,y=j) =  3/4 (prob of picking element from the subset {2,3,4} from {1,2,3,4}) * 1/3 *
-# 1/3 (probability of picking an element from {2,3,4} = 1/12
+# 1/3 (probability of picking an element from {2,3,4} for each of the two dice) = 1/12
 
 # As before, let's consider z = x + y
 # 2: (1,1) p = 1/4.. because if one dice rolls 1, the other must also!
