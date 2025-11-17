@@ -9,8 +9,9 @@ This lecture introduces only the core probability ideas directly used later in d
 3. Expectation and variance  
 4. Independence and covariance  
 5. Joint and conditional probabilities; Bayes’ theorem  
-6. Comparing distributions (KL divergence & MSE)  
-7. Cross-entropy loss and its gradient
+6. Estimating distribution parameters: API Response time example
+7. Comparing distributions (KL divergence & MSE)  
+8. Cross-entropy loss and its gradient
 
 ### Pre-read (verified links)
 - [Khan Academy — Probability & Statistics](https://www.khanacademy.org/math/statistics-probability)  
