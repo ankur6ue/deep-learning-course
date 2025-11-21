@@ -25,25 +25,18 @@ a_hist = torch.empty(n, 0)
 for trials in range(0, N):
     x = torch.randn(m, B, requires_grad=False)
     W = torch.randn(n, m, requires_grad=False)
-    b = torch.zeros(n, 1)
-
     # y is n*1
     # In Pytorch, @ means matrix multiplication, * means hadamard product
-    y = W @ x + b
+    y = W @ x
     y_hist = torch.cat([y_hist, y], dim=1)
-    a = y.clamp(min=0)
-    a_hist = torch.cat([a_hist, a], dim=1)
+
 
 mean_y = y_hist.mean(dim=1)
 var_y = y_hist.var(dim=1)
-mean_a = a_hist.mean(dim=1)
-var_a = a_hist.var(dim=1)
-# From lecture slides, we expect mean_a = sqrt(var(y)/2pi)
-print(f'mean of first element of activation array: {mean_a[0]}')
-print(f'mean of first element of activation array from math: {np.sqrt(var_y[0]/(2*np.pi))}')
-# From lecture slides, we expect var_a approx m*var(x)*var(W)/2*(1-1/2pi)
-print(f'variance of first element of activation array: {var_a[0]}')
-print(f'variance of first element of activation array from math: {m * 1 * 1/2 * (1 - 1/(2*np.pi))}')
+
+# From lecture slides, we expect mean_y = 0
+print(f'mean of first element of y: {mean_y[0]}')
+# From lecture slides, we expect var_y = m*var_x*var_W = m
+print(f'variance of first element of activation array: {var_y[0]}')
+
 print('done')
-# verify mean (n*1 vector) is close to 0
-# verify variance (n*1 vector) is close to m + 1 (1 for the bias term)
