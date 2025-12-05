@@ -28,7 +28,6 @@ class LinearFn(torch.autograd.Function):
 class LinearModule(nn.Module):
     def __init__(self, _in, _out, name, scale=1):
         super().__init__()
-        # Need to set a scale for class_2/simple_nn1_mlflow.py example, when Simple Optimizer is being used
         # We implement the matrix mul in a linear layer as Wx + b, so the second dimension of W must match the input
         # to the layer
         self.weight = torch.randn(_out, _in) * np.sqrt(1 / _in) * scale

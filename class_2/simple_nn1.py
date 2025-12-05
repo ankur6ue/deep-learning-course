@@ -31,7 +31,11 @@ import matplotlib
 
 # Set the seed for reproducibility
 torch.manual_seed(42)
-# We train a simple neural network with 1 hidden layer to learn to predict the value of a sine function
+# Here we make the following changes on top of simple_nn1.py:
+# 1. Define our own Pytorch modules, subclassing pytorch nn.module classes.
+#    Implement the forward/backward pass manually
+# 2. Sample a mini-batch from the training dataset without replacement
+# 3. Try different optimizers and learning rate schedules
 
 
 if __name__ == "__main__":

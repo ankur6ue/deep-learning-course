@@ -30,7 +30,7 @@ import matplotlib
 from torch.utils.data import Dataset, DataLoader, RandomSampler
 
 # We train a simple neural network with 1 hidden layer to learn to predict the value of a sine function
-# We use the pytorch dataloader and sampler instead of manual sampling as in simple_nn1_mlflow.py
+# Here we start with simple_nn1.py and use the pytorch dataloader and sampler instead of manual sampling
 
 # Set the seed for reproducibility
 torch.manual_seed(42)

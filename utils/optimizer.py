@@ -80,51 +80,57 @@ class AdamOptimizer:
 
 
 class AdamWOptimizer(AdamOptimizer):
-    def __init__(self, layers, learning_rate=0.01, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.005):
+    def __init__(self, layers, learning_rate=0.01,
+                 beta1=0.9, beta2=0.999, epsilon=1e-8,
+                 weight_decay=0.005):
         super().__init__(layers, learning_rate, beta1, beta2, epsilon)
         self.wd = weight_decay
 
-
     def step(self):
         """
-        Performs a single optimization step.
+        Performs a single optimization step (AdamW).
         """
         self.t += 1  # Increment timestep
+
         for l in self.layers:
             layer_name = l.name
-            # weights and biases
+
+            # ===== WEIGHTS =====
+            # 1) Decoupled weight decay: apply directly to weights
+            #    θ <- θ - lr * wd * θ  == θ * (1 - lr * wd)
+            l.weight.data -= self.lr * self.wd * l.weight.data
 
             param_name = layer_name + "_w"
-            param_value = l.weight.grad
+            grad = l.weight.grad
+
             if param_name not in self.m:
-                self.m[param_name] = torch.zeros_like(param_value)
-                self.v[param_name] = torch.zeros_like(param_value)
-            # Update biased first moment estimate
-            self.m[param_name] = self.beta1 * self.m[param_name] + (1 - self.beta1) * l.weight.grad
-            # Update biased second raw moment estimate
-            self.v[param_name] = self.beta2 * self.v[param_name] + (1 - self.beta2) * (l.weight.grad ** 2)
-            # Bias correction for first moment
+                self.m[param_name] = torch.zeros_like(grad)
+                self.v[param_name] = torch.zeros_like(grad)
+
+            # 2) Adam moments
+            self.m[param_name] = self.beta1 * self.m[param_name] + (1 - self.beta1) * grad
+            self.v[param_name] = self.beta2 * self.v[param_name] + (1 - self.beta2) * (grad ** 2)
+
+            # 3) Bias correction
             m_hat = self.m[param_name] / (1 - self.beta1 ** self.t)
-            # Bias correction for second moment
             v_hat = self.v[param_name] / (1 - self.beta2 ** self.t)
-            # Update parameters
-            l.weight.data -= self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
-            # weight decay
-            l.weight.data -= self.wd * self.lr * l.weight.data
-            # biases
+
+            # 4) Adam parameter update (on already-decayed weights)
+            l.weight.data -= self.lr * m_hat / (torch.sqrt(v_hat) + self.epsilon)
+
+            # ===== BIASES (no weight decay) =====
             param_name = layer_name + "_b"
-            param_value = l.bias.grad
+            grad = l.bias.grad
+
             if param_name not in self.m:
-                self.m[param_name] = torch.zeros_like(param_value)
-                self.v[param_name] = torch.zeros_like(param_value)
-            # Update biased first moment estimate
-            self.m[param_name] = self.beta1 * self.m[param_name] + (1 - self.beta1) * l.bias.grad
-            # Update biased second raw moment estimate
-            self.v[param_name] = self.beta2 * self.v[param_name] + (1 - self.beta2) * (l.bias.grad ** 2)
-            # Bias correction for first moment
+                self.m[param_name] = torch.zeros_like(grad)
+                self.v[param_name] = torch.zeros_like(grad)
+
+            self.m[param_name] = self.beta1 * self.m[param_name] + (1 - self.beta1) * grad
+            self.v[param_name] = self.beta2 * self.v[param_name] + (1 - self.beta2) * (grad ** 2)
+
             m_hat = self.m[param_name] / (1 - self.beta1 ** self.t)
-            # Bias correction for second moment
             v_hat = self.v[param_name] / (1 - self.beta2 ** self.t)
-            # Update parameters
-            l.bias.data -= self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
-            # no weight decay for biases
+
+            l.bias.data -= self.lr * m_hat / (torch.sqrt(v_hat) + self.epsilon)
+            # (no weight decay for biases)

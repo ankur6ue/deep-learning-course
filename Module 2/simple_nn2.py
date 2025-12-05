@@ -22,20 +22,21 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.linear import LinearModule
 from utils.relu import ReLUModule
 from utils.losses import MSELossModule
-from utils.optimizer import AdamOptimizer, SimpleOptimizer
+from utils.optimizer import AdamOptimizer, SimpleOptimizer, AdamWOptimizer
 from utils.lr_scheduler import LinearLR, ConstantLR, CosineLR
 from utils.simple_nn_sinx import SimpleNN, create_dataset, draw_movie_frame
 import matplotlib.pyplot as plt
 import argparse
 import matplotlib
-# MLFlow related
-import mlflow
-# start mlflow server by typing "mlflow ui" on command prompt. Default port is 5000
+
 # Set the seed for reproducibility
 torch.manual_seed(42)
+# Here we make the following changes on top of simple_nn1.py:
+# 1. Define our own Pytorch modules, subclassing pytorch nn.module classes.
+#    Implement the forward/backward pass manually
+# 2. Sample a mini-batch from the training dataset without replacement
+# 3. Try different optimizers and learning rate schedules
 
-# We train a simple neural network with 1 hidden layer to learn to predict the value of a sine function. We use
-# Tensorboard to log hyperparameter values and metrics generated during training
 
 if __name__ == "__main__":
     # This makes plots show up as a separate figure
@@ -47,7 +48,7 @@ if __name__ == "__main__":
                                                                       'captured and saved to a frames directory')
     parser.add_argument('--optimizer', choices=['simple', 'adam'], default='adam')
     parser.add_argument('--lr_scheduler', choices=['linear', 'cosine', 'constant'], default='linear')
-    parser.add_argument('--non_linearity', choices=['relu', 'tanh', 'leakyrelu', 'swish'], default='swish')
+    parser.add_argument('--non_linearity', choices=['relu', 'tanh', 'leakyrelu', 'swish'], default='relu')
     parser.add_argument('--lr', type=float, default=0.07, help='learning rate (default: 0.07)')
     parser.add_argument('--epochs', type=int, default=500, help='number of epochs')
     parser.add_argument('--batch_size', type=int, default=300, help='batch size (should divide N)')
@@ -79,47 +80,29 @@ if __name__ == "__main__":
     if args.lr_scheduler == "constant":
         lr_scheduler = ConstantLR(optimizer, num_steps, lr, 0.001)
     loss_func_history = []
-    remote_server_uri = "http://127.0.0.1:5000"  # set to your server URI,
-    mlflow.set_tracking_uri(remote_server_uri)
-    mlflow.set_experiment("Approximating a sine function using a simple NN")
-    with mlflow.start_run(): # run name generated at random by mlflow
-        # 1. Log parameters
-        mlflow.log_param("epochs", args.epochs)
-        mlflow.log_param("initial learning rate", args.lr)
-        mlflow.log_param("batch size", args.batch_size)
-        mlflow.log_param("optimizer", args.optimizer)
-        mlflow.log_param("learning rate schedule", args.lr_scheduler)
-        mlflow.log_param("model type", "MLP")
-        mlflow.log_param("hidden units", args.H)
-
-        c = 0 # global iteration count
-        for e in range(args.epochs):
-            # Each epoch uses a different permutation of indices
-            indices = torch.randperm(N)
-            for iter in range(num_iter_per_epoch):
-                batch_indices = indices[iter*B: (iter+1)*B]
-                X_ = X[:, batch_indices]
-                Y_ = Y[:, batch_indices]
-                o = model(X_)    # Forward pass
-                loss = criterion(o, Y_)
-                if args.capture_frames:
-                    if c % 2 == 0:
-                        draw_movie_frame(model, c/2)
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
-                lr_scheduler.step(c)
-                loss_func_history.append(loss.item())
-                c = c + 1
-            # print loss after every epoch
-            print(f"After Epoch {e}, Loss  = {loss.item(): .4f}")
-            # also send to MLflow
-            # .item extracts the value from a single element tensor,
+    c = 0 # global iteration count
+    for e in range(args.epochs):
+        # Each epoch uses a different permutation of indices
+        indices = torch.randperm(N)
+        for iter in range(num_iter_per_epoch):
+            batch_indices = indices[iter*B: (iter+1)*B]
+            X_ = X[:, batch_indices]
+            Y_ = Y[:, batch_indices]
+            o = model(X_)    # Forward pass
+            loss = criterion(o, Y_)
+            if args.capture_frames:
+                if c % 2 == 0:
+                    draw_movie_frame(model, c/2)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            lr_scheduler.step(c)
+            loss_func_history.append(loss.item()) # .item extracts the value from a single element tensor,
             # converting it into a python number
-            mlflow.log_metrics(
-                {"loss": loss.item()},
-                step=e,
-            )
+            c = c + 1
+        # print loss after every epoch
+        print(f"After Epoch {e}, Loss  = {loss.item(): .4f}")
+
 
     # generate test data
     x_test = torch.linspace(-2 * np.pi, 2 * np.pi, 300)
@@ -134,4 +117,5 @@ if __name__ == "__main__":
     plt.plot(range(0,c), loss_func_history, color='red', label="Loss function progression")
     plt.title("Progression of the loss function")
     plt.legend()
+    plt.show()
     print('done')
