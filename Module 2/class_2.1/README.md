@@ -1,70 +1,56 @@
-# README — Module 2 · Class 2.1  
-Building Simple Neural Networks
-
+# Lecture 2.1 — Building Simple Neural Networks
 © 2025 Ankur Mohan
 
-## Pre-read
-- Regularization (weight decay, dropout)
-- Adam and AdamW optimizers
+## Agenda
+1. Structure of a Neural Network
+2. Loss Functions
+3. Optimization & Training Dynamics
+4. Regularization Techniques
+5. Optimizers
+6. Weight Initialization & Variance Propagation
+7. PyTorch Implementation
+8. Homework & Self‑Study
 
-## Topics Covered
-1. Structure of neural networks  
-2. Loss functions  
-3. Mini-batch gradient descent  
-4. Optimizers (SGD, RMSProp, Adam, AdamW)  
-5. Learning rate schedules  
-6. Regularization  
-7. Hyperparameters  
-8. Example: Predicting sin(x)  
-9. Manual forward/backward implementation  
-10. PyTorch Dataset and DataLoader  
+## Pre‑Read Materials
+- 3Blue1Brown Episode 1: https://www.3blue1brown.com/lessons/neural-networks
+- MIT Introduction to Deep Learning (gradient descent): https://youtu.be/iOh7QUZGyiU
+- CS231n Neural Networks Part 1: https://cs231n.github.io/neural-networks-1/
+- Khan Academy Multivariable Derivatives: https://www.khanacademy.org/math/multivariable-calculus
 
-## Structure of a Neural Network
-Neural networks consist of layers, nonlinearities, loss functions, and forward/backward passes. Backpropagation computes gradients layer by layer.
+## Learning Objectives
+- Understand forward and backward passes
+- Implement gradient‑based training manually
+- Explain overfitting and regularization
+- Understand Xavier/He initialization  
+- Compute mean/variance of ReLU outputs
 
-## Loss Functions
-- Regression: MSE  
-- Classification: Cross-entropy  
-Ground truth may be supervised, weakly supervised, or self-supervised.
+## Key Math
+### Linear Layer
+y = Wx + b
 
-## Mini-Batch Gradient Descent
-Batch size influences gradient noise and compute cost. One full pass over the training set = epoch.
+∂E/∂W = δ xᵀ  
+∂E/∂b = δ  
+∂E/∂x = Wᵀ δ  
 
-## Weight Updates
-Weights updated using:
-θ ← θ − η ∇θ L  
-Modern optimizers add momentum, adaptivity, regularization, and schedules.
+### ReLU Statistics
+If y ~ N(0, σ²):
 
-## Learning Rate Schedules
-Examples: step decay, linear decay, cosine annealing, warmup.
+E[ReLU(y)] = σ / √(2π)  
+Var(ReLU(y)) = σ² (1/2 − 1/(2π))
 
-## Regularization
-- Weight decay encourages small weights.  
-- Dropout improves robustness.  
-- Underfitting vs overfitting considerations.
-
-## Optimizers
-**SGD**: uniform treatment of parameters  
-**RMSProp**: adaptive per-parameter LR  
-**Adam**: momentum + RMSProp + bias correction  
-**AdamW**: Adam with decoupled weight decay  
-
-## Hyperparameters
-Learning rate, hidden layer size, activation, batch size, schedule, weight decay, dropout.
-
-## Code Examples
-- simple_nn1.py — simple sin(x) predictor  
-- simple_nn2.py — manual NN training loop  
-- simple_nn3.py — PyTorch Dataset/DataLoader  
+### He Initialization
+Var(W_ij) = 2 / n_in
 
 ## Homework
-1. Run simple_nn2.py; record loss & curve.  
-2. Try 'simple' optimizer; compare.  
-3. Use Adam + varying hidden sizes.  
-4. Change activation to Swish; compare.  
-5. Save loss histories & compare.  
-6. Step through code in debugger.  
-7. Test model on −3π to 3π; observe generalization.
+### Math
+1. Derive E[ReLU(Y)] and Var(ReLU(Y)].
+2. Show variance explosion with naive initialization.
+3. Explain exploding variance despite zero mean.
 
-## Appendix: Backpropagation
-Slides cover derivatives for weights, biases, ReLU, and batched backprop.
+### Coding
+1. Monte‑Carlo variance experiment.
+2. Activation histogram visualization.
+3. Dropout comparison experiment.
+
+## License
+© 2025 Ankur Mohan

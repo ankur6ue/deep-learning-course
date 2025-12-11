@@ -40,7 +40,7 @@ torch.manual_seed(42)
 
 if __name__ == "__main__":
     # This makes plots show up as a separate figure
-    matplotlib.use('TkAgg')
+    # matplotlib.use('TkAgg')
     parser = argparse.ArgumentParser(description='Train a simple neural network to model a sine function')
     parser.add_argument('--N', type=int, default=600, help='Number of points in the sine wave')
     parser.add_argument('--H', type=int, default=100, help='Size of hidden layer')
