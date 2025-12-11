@@ -29,7 +29,7 @@ a_hist = torch.empty(n, 0)
 
 for trials in range(0, N):
     # Sample input x: shape (m, B)
-    x = torch.randn(m, B, requires_grad=False) + 2
+    x = torch.randn(m, B, requires_grad=False)
 
     # Sample weight matrix W: shape (n, m)
     W = torch.randn(n, m, requires_grad=False)
