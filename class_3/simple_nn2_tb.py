@@ -24,7 +24,7 @@ import matplotlib
 import sys
 # The below is ugly and not recommended, but lets us run the code as a file (python -m simple_nn1_mlflow.py) instead
 # of converting it into a package..
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from utils.linear import LinearModule
 from utils.relu import ReLUModule
 from utils.losses import CrossEntropyLossModule
