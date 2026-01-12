@@ -11,7 +11,7 @@ from PIL import Image
 from train_mnist_cnn import MnistCNN, MODEL_PATH
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DATA_DIR = Path("../data")
+DATA_DIR = Path("../../Module 2/data")
 OOD_DIR = DATA_DIR / "ood_mnist_digits"
 OUT_REF = DATA_DIR / "mnist_reference.parquet"
 OUT_PROD = DATA_DIR / "mnist_production.parquet"

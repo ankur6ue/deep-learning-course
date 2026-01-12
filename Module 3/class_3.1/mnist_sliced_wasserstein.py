@@ -18,7 +18,7 @@ import random
 from pathlib import Path
 from PIL import Image
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DATA_DIR = Path("../data")
+DATA_DIR = Path("../../Module 2/data")
 OOD_DIR = DATA_DIR / "ood_mnist_digits"
 
 def load_ood_images():
@@ -172,8 +172,8 @@ def main():
     device = DEVICE
 
     tf = transforms.Compose([transforms.ToTensor()])
-    train_ds = datasets.MNIST("./data", train=True, download=True, transform=tf)
-    test_ds  = datasets.MNIST("./data", train=False, download=True, transform=tf)
+    train_ds = datasets.MNIST("data", train=True, download=True, transform=tf)
+    test_ds  = datasets.MNIST("data", train=False, download=True, transform=tf)
     train_loader = torch.utils.data.DataLoader(train_ds, batch_size=args.batch_size, shuffle=False, num_workers=2,
                                               pin_memory=True)
     test_loader  = torch.utils.data.DataLoader(test_ds,  batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=True)

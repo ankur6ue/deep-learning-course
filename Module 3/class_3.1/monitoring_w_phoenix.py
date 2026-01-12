@@ -10,8 +10,8 @@ os.environ["PHOENIX_PORT"] = "6100"
 # Optional: also set host explicitly
 os.environ["PHOENIX_HOST"] = "127.0.0.1"
 
-ref_df = pd.read_parquet("../data/mnist_reference.parquet")
-prod_df = pd.read_parquet("../data/mnist_production.parquet")
+ref_df = pd.read_parquet("../../Module 2/data/mnist_reference.parquet")
+prod_df = pd.read_parquet("../../Module 2/data/mnist_production.parquet")
 
 feature_cols = [c for c in ref_df.columns if c.startswith("embedding")]
 # 2. Define the schema (map your column names)

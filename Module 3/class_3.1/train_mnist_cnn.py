@@ -9,7 +9,7 @@ from pathlib import Path
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 128
 EPOCHS = 5
-MODEL_DIR = Path("../models")
+MODEL_DIR = Path("../../Module 2/models")
 MODEL_DIR.mkdir(exist_ok=True)
 MODEL_PATH = MODEL_DIR / "mnist_cnn.pt"
 

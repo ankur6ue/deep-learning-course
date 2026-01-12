@@ -7,7 +7,7 @@ import torch
 from pathlib import Path
 
 
-OUT_DIR = Path("../data/ood_mnist_digits")
+OUT_DIR = Path("../../Module 2/data/ood_mnist_digits")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 DIGITS = ["10", "11", "12", "13"]
