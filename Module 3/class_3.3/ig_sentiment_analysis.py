@@ -156,7 +156,7 @@ def integrated_gradients_tokens(
 
 
 text = "The flight delays ruined our vacation and caused us much stress"
-text = "we thoroughly enjoyed the wonderful food at the restaurant"
+# text = "we thoroughly enjoyed the wonderful food at the restaurant"
 encoded_input = tokenizer(text, return_tensors="pt")
 
 # Standard prediction (your code)
