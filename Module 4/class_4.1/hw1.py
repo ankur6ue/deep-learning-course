@@ -218,15 +218,6 @@ def main():
     print(f"mAP (all queries): {map_all:.3f}")
     print(f"MRR (all queries): {mrr_all:.3f}")
 
-    print("\n=== NDCG examples ===")
-    for qid in ["q1", "q2", "q3"]:
-        ranked = run[qid]
-        grades = qrels_graded[qid]
-        for k in [1, 2, 3]:
-            ndcg = ndcg_at_k(ranked, grades, k)
-            print(f"NDCG@{k}({qid}): {ndcg:.3f}")
-        print("")
-
 
 if __name__ == "__main__":
     main()
