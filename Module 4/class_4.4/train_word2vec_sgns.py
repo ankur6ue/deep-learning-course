@@ -28,7 +28,7 @@ from torch.utils.data import Dataset, DataLoader
 # Config
 # -----------------------------
 
-DATA_PATH = "../data/text8"      # path to your corpus .txt file
+DATA_PATH = "../data/text8"  # path to your corpus .txt file
 MIN_FREQ = 5                  # minimum word frequency to keep in vocab
 MAX_VOCAB_SIZE = 50000        # cap vocab size for speed
 EMBED_DIM = 128
