@@ -41,29 +41,20 @@ class Example:
 
 
 def make_example(rng: random.Random, min_len=10, max_len=16) -> Example:
-    # Always-disagree binding setup
-    good_aspect = rng.choice(ASPECTS)
-    bad_aspect = "service" if good_aspect == "food" else "food"
+    # 4 combos ~ equally likely
+    food_good = (rng.random() < 0.5)
+    service_good = (rng.random() < 0.5)
+
     query_aspect = rng.choice(ASPECTS)
-    label = 1 if query_aspect == good_aspect else 0
-
-    clause_good = ["the", good_aspect, "was", "good"]
-    clause_bad = ["but", "the", bad_aspect, "was", "bad"]
-
-    if rng.random() < 0.5:
-        sent = clause_good + clause_bad
+    if query_aspect == "food":
+        label = 1 if food_good else 0
     else:
-        clause_bad2 = ["the", bad_aspect, "was", "bad"]
-        clause_good2 = [rng.choice(["and", "but"]), "the", good_aspect, "was", "good"]
-        sent = clause_bad2 + clause_good2
+        label = 1 if service_good else 0
 
-    fillers = ["the", "was", "and", "but"]
-    target_len = rng.randint(min_len, max_len)
-    while len(sent) < target_len:
-        if rng.random() < 0.5:
-            sent.insert(0, rng.choice(fillers))
-        else:
-            sent.append(rng.choice(fillers))
+    sent = [
+        "the", "food", "was", "good" if food_good else "bad",
+        "the", "service", "was", "good" if service_good else "bad",
+    ]
 
     return Example(query_aspect=query_aspect, tokens=sent, label=label)
 
@@ -81,7 +72,7 @@ class ToyAspectDataset(Dataset):
 
 
 def encode(example: Example, max_len: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    toks = ["[Q]", example.query_aspect] + example.tokens
+    toks = [example.query_aspect] + example.tokens
     ids = [TOK2ID[t] for t in toks][:max_len]
     attn = [1] * len(ids)
     while len(ids) < max_len:
@@ -149,7 +140,7 @@ class SelfAttentionBlock(nn.Module):
 class ContextualQueryAttentionClassifier(nn.Module):
     """
     Contextualize tokens, then do query-conditioned pooling.
-    Pooling attends ONLY over sentence tokens (exclude [Q] and aspect positions) for interpretability.
+    Pooling attends ONLY over sentence tokens (exclude aspect positions) for interpretability.
     """
     def __init__(self, vocab_size: int, d_model: int, d_k: int, max_len: int):
         super().__init__()
@@ -178,8 +169,7 @@ class ContextualQueryAttentionClassifier(nn.Module):
         scores = (k * q.unsqueeze(1)).sum(dim=-1) / (q.size(-1) ** 0.5)  # [B,L]
 
         pool_mask = attn_mask.clone()
-        pool_mask[:, 0] = 0  # exclude [Q]
-        pool_mask[:, 1] = 0  # exclude aspect token
+        pool_mask[:, 0] = 0  # exclude aspect token
         scores = scores.masked_fill(pool_mask == 0, -1e9)
 
         alpha_pool = torch.softmax(scores, dim=-1)
@@ -200,13 +190,22 @@ class ContextualQueryAttentionClassifier(nn.Module):
         scores = (k * q.unsqueeze(1)).sum(dim=-1) / (q.size(-1) ** 0.5)
 
         pool_mask = attn_mask.clone()
-        pool_mask[:, 0] = 0
-        pool_mask[:, 1] = 0
+        pool_mask[:, 0] = 0 # exclude aspect
         scores = scores.masked_fill(pool_mask == 0, -1e9)
         alpha_pool = torch.softmax(scores, dim=-1)  # [1,L]
-
-        alpha_ctx_row = alpha_ctx[0, 1, :]          # aspect token attends to...
-        return alpha_ctx_row.detach().cpu(), alpha_pool[0].detach().cpu()
+        tok_id = TOK2ID['good']
+        tok_id_list = input_ids.tolist()
+        alpha_ctx_row_good = []
+        alpha_ctx_row_bad = []
+        if tok_id in tok_id_list[0]:
+            pos_good = tok_id_list[0].index(tok_id)
+            alpha_ctx_row_good = alpha_ctx[0, pos_good, :].detach().cpu().numpy()
+        tok_id = TOK2ID['bad']
+        if tok_id in tok_id_list[0]:
+            pos_bad = tok_id_list[0].index(tok_id)
+            alpha_ctx_row_bad = alpha_ctx[0, pos_bad, :].detach().cpu().numpy()
+        # aspect token attends to...
+        return alpha_ctx_row_good, alpha_ctx_row_bad, alpha_pool[0].detach().cpu()
 
 
 def accuracy(model: nn.Module, dl: DataLoader, device: torch.device) -> float:
@@ -253,6 +252,39 @@ def pretty(tokens: List[int], weights: List[float]) -> str:
         pairs.append(f"{tok}:{w:.2f}")
     return "  ".join(pairs)
 
+def cosine_sim_matrix(P):  # P: [L,D] torch CPU float
+    Pn = P / (P.norm(dim=1, keepdim=True) + 1e-12)
+    return Pn @ Pn.T  # [L,L]
+
+# Used to plot a heatmap of the position embeddings before and after training..
+# The position embeddings don't move much.. the model needs to move the embeddings just enough to
+# solve this easy task
+def plot_pos_similarity(P, title="Positional embedding cosine similarity"):
+    import matplotlib.pyplot as plt
+    S = cosine_sim_matrix(P).numpy()
+    plt.figure()
+    plt.imshow(S, aspect="auto")
+    plt.colorbar()
+    plt.title(title)
+    plt.xlabel("position j")
+    plt.ylabel("position i")
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_position_movement(pos_snaps, title="How much each position embedding moved"):
+    import matplotlib.pyplot as plt
+    P0 = pos_snaps[0]
+    Plast = pos_snaps[-1]
+    delta = (Plast - P0).norm(dim=1).numpy()  # [L]
+    plt.figure()
+    plt.plot(delta, marker="o", linewidth=1)
+    plt.title(title)
+    plt.xlabel("position")
+    plt.ylabel("||P_final - P_init||")
+    plt.tight_layout()
+    plt.show()
+
 
 def save_embeddings(save_dir: str, model: ContextualQueryAttentionClassifier, max_len: int) -> str:
     Path(save_dir).mkdir(parents=True, exist_ok=True)
@@ -275,7 +307,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--train_n", type=int, default=8000)
     ap.add_argument("--test_n", type=int, default=2000)
-    ap.add_argument("--max_len", type=int, default=24)
+    ap.add_argument("--max_len", type=int, default=12)
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--d_model", type=int, default=64)
     ap.add_argument("--d_k", type=int, default=32)
@@ -303,7 +335,11 @@ def main():
 
     mean_opt = torch.optim.AdamW(mean_model.parameters(), lr=args.lr)
     attn_opt = torch.optim.AdamW(attn_model.parameters(), lr=args.lr)
-
+    plot_pos_similarity(attn_model.pos.weight.detach(), title="Positional embedding cosine similarity")
+    pos_snaps = []
+    # detach() stops autograd, but it doesn’t copy the tensor. You’re appending a tensor that still points to the
+    # same underlying storage. That's why we need the clone
+    pos_snaps.append(attn_model.pos.weight.detach().clone().cpu())
     print("Training...")
     for ep in range(1, args.epochs + 1):
         mean_loss = train_epoch(mean_model, train_dl, mean_opt, device)
@@ -314,23 +350,29 @@ def main():
 
     # Save embeddings for separate visualization
     npz_path = save_embeddings(args.save_dir, attn_model, args.max_len)
+    pos_snaps.append(attn_model.pos.weight.detach().clone().cpu())
+    plot_position_movement(pos_snaps)
     print(f"\nSaved embeddings -> {npz_path}")
-
+    plot_pos_similarity(attn_model.pos.weight.detach(), title="Positional embedding cosine similarity")
     # Inspect a few examples
-    for _ in range(3):
+    for _ in range(6):
         ex = make_example(rng)
         input_ids, attn_mask, _ = encode(ex, args.max_len)
         input_ids_b = input_ids.unsqueeze(0).to(device)
         attn_mask_b = attn_mask.unsqueeze(0).to(device)
 
-        alpha_ctx_row, alpha_pool = attn_model.inspect(input_ids_b, attn_mask_b)
+        alpha_ctx_row_good, alpha_ctx_row_bad, alpha_pool = attn_model.inspect(input_ids_b, attn_mask_b)
         toks = input_ids.detach().cpu().numpy().tolist()
 
         print("\nExample:")
         print(" query_aspect:", ex.query_aspect, "label:", ex.label)
         print(" tokens:", " ".join(ex.tokens))
-        print(" encoder self-attn (aspect token attends to...):")
-        print(pretty(toks, alpha_ctx_row.numpy().tolist()))
+        if len(alpha_ctx_row_good) > 0:
+            print(" encoder self-attn ('good' token attends to...):")
+            print(pretty(toks, alpha_ctx_row_good))
+        if len(alpha_ctx_row_bad) > 0:
+            print(" encoder self-attn ('bad' token attends to...):")
+            print(pretty(toks, alpha_ctx_row_bad))
         print(" pooling attn (where we read out from):")
         print(pretty(toks, alpha_pool.numpy().tolist()))
 
