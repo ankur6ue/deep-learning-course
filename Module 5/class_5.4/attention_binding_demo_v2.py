@@ -162,7 +162,7 @@ class ContextualQueryAttentionClassifier(nn.Module):
         x = self.emb(input_ids) + self.pos(pos_ids)
         x, _ = self.encoder(x, attn_mask)
 
-        q = self.Pq(x[:, 1, :])                         # aspect token position
+        q = self.Pq(x[:, 0, :])                         # aspect token position
         k = self.Pk(x)
         v = self.Pv(x)
 
@@ -185,7 +185,7 @@ class ContextualQueryAttentionClassifier(nn.Module):
         x = self.emb(input_ids) + self.pos(pos_ids)
         x, alpha_ctx = self.encoder(x, attn_mask)  # alpha_ctx: [1,L,L]
 
-        q = self.Pq(x[:, 1, :])
+        q = self.Pq(x[:, 0, :])
         k = self.Pk(x)
         scores = (k * q.unsqueeze(1)).sum(dim=-1) / (q.size(-1) ** 0.5)
 
@@ -307,7 +307,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--train_n", type=int, default=8000)
     ap.add_argument("--test_n", type=int, default=2000)
-    ap.add_argument("--max_len", type=int, default=12)
+    ap.add_argument("--max_len", type=int, default=20)
     ap.add_argument("--batch_size", type=int, default=64)
     ap.add_argument("--d_model", type=int, default=64)
     ap.add_argument("--d_k", type=int, default=32)
