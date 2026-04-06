@@ -29,7 +29,6 @@ from pathlib import Path
 import torch
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
-
 from llmcompressor import oneshot
 from llmcompressor.modifiers.quantization import GPTQModifier, QuantizationModifier
 
@@ -40,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-id",
         type=str,
-        default="/home/ankur/dev/models/Llama-3.1-8B-Instruct",
+        default="/home/ankur/dev/models/Ministral-3-14B-Instruct-2512-BF16",
         help="Base HF model path / ID to quantize.",
     )
 
@@ -188,6 +187,18 @@ def build_save_dir_name(
     return f"{base_name}-quant-{method}-{scheme}-calib{num_calib}-msl{max_seq_length}"
 
 
+def patch_tokenizer_config(save_dir: Path):
+    import json
+    cfg_path = save_dir / "tokenizer_config.json"
+    if not cfg_path.exists():
+        return
+    cfg = json.loads(cfg_path.read_text())
+    if cfg.get("tokenizer_class") == "TokenizersBackend":
+        cfg["tokenizer_class"] = "PreTrainedTokenizerFast"
+        cfg_path.write_text(json.dumps(cfg, indent=2))
+        print("[INFO] Patched tokenizer_class -> PreTrainedTokenizerFast")
+
+
 def quantize_with_gptq(
     model_id: str,
     tokenizer,
@@ -231,7 +242,7 @@ def quantize_with_gptq(
     print(f"[INFO] Saving GPTQ-quantized model to {save_dir}")
     model.save_pretrained(save_dir, save_compressed=True)
     tokenizer.save_pretrained(save_dir)
-
+    patch_tokenizer_config(save_dir)
 
 def quantize_with_nvfp4(
     model_id: str,
@@ -249,6 +260,11 @@ def quantize_with_nvfp4(
     )
 
     ignore_list = ["lm_head"] if args.ignore_lm_head else []
+    ignore_list += [
+        r"re:.*embed_tokens",
+        r"re:model\.vision_tower.*",
+        r"re:model\.multi_modal_projector.*",
+    ]
     recipe = QuantizationModifier(
         targets=args.targets,
         scheme=args.nvfp4_scheme,  # typically "NVFP4"
@@ -276,7 +292,7 @@ def quantize_with_nvfp4(
     print(f"[INFO] Saving NVFP4-quantized model to {save_dir}")
     model.save_pretrained(save_dir, save_compressed=True)
     tokenizer.save_pretrained(save_dir)
-
+    patch_tokenizer_config(save_dir)
 
 def main():
     args = parse_args()
@@ -291,7 +307,10 @@ def main():
         f"max_seq_length={args.max_seq_length}"
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_id,
+        trust_remote_code=True,
+    )
 
     ds = load_calibration_dataset(
         tokenizer=tokenizer,
