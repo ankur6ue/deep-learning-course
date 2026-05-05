@@ -1,131 +1,66 @@
-## Module 1: Foundations
+# Deep Learning Course
 
-### Lecture 1.1: Introduction and history of Neural Networks
-- Biological analogy
-- Rise of deep learning
-- Overview of course roadmap
+This repository is a project-based deep learning course organized as lecture modules, slide decks, runnable labs, and systems experiments. The material moves through core mathematical foundations, building and training small neural networks, information retrieval, transformers, reinforcement learning, LLM serving and multi-GPU distributed training
 
-### Lecture 1.2: Mathematical Preliminaries
-- Univariate differential calculus
-- Optimization
-- Gradient descent 
+The course is meant to be used in two complementary ways:
 
-### Lecture 1.3: Mathematical Preliminaries
+- as a structured teaching sequence, where concepts build across modules
+- as a hands-on lab repository, where lectures are paired with executable code
 
-- Vectors, matrices, linear transformations
-- Notation conventions
-- Multivariate differential calculus
+## Intended Audience
 
-### Lecture 1.4: Mathematical Preliminaries
+This course is aimed at:
 
-- Random variables, probability distributions
-- KL Distance
-- Expectation, Variance
- 
+- software engineers who want a practical introduction to deep learning
+- ML engineers who want to connect model internals with systems concerns
+- data scientists interested in operational aspects of deep learning models such as distributed training, internals of the vllm serving system, profiling GPU code using nVidia profiler etc. 
 
-## Module 2: Neural Networks
+Python familiarity is assumed. The early modules cover the mathematical background needed for the rest of the repository.
 
-### Lecture 2.1: Feedforward Neural Networks
-- Neural network architecture
-- MLPs
-- Non-linearities
-- Forward/Backward pass
+## Repository Structure
 
-### Lecture 2.2: Backpropagation
-- Derivation of backprop equations
-- Introduction to Pytorch
+Most modules are organized into `class_x.y/` directories. Lecture folders typically contain:
 
-### Lecture 2.4: Losses
-- Mean Square Error
-- Cross Entropy, Log Likelihood
+- a slide deck (`.pptx`)
+- Python scripts illustrating the ideas in the lecture
+- pre-read/post-read materials and suggested homework assignments and readings. 
 
-### Lecture 2.3: Monitoring/Observability
-- Tensorboard, MLFlow, W&B
+## Module Overview
 
-### Lecture 2.4: Regularization and Generalization
-- Weight decay, dropout
-- Bias-Variance trade-off
+### Module 1: Foundations for Deep Learning
 
-### Lecture 2.5: Advanced Optimization
-- Adam, AdamW
-- Learning rate schedules (linear, cosine, warmup)
+Introduces deep learning as function approximation and optimization. Covers derivatives, gradient descent, multivariate calculus, chain rule, linear regression, the role of non-linearities, and probability fundamentals.
 
-### Lecture 2.6: Initialization and Normalization
-- Xavier/He initialization
-- Batchnorm, Layernorm, Groupnorm
+### Module 2: Building and Training Simple Neural Networks
 
-## Module 3: Other Neural Network Architectures
-### Lecture 3.1:
-- Convolutional Neural Networks
-- Skip connections
-- Efficiency Tricks
+Focuses on the mechanics of neural network training: forward and backward passes, regularization, initialization, and practical classification examples such as MNIST and synthetic datasets.
 
-## Module 4: GPUs
-### Lecture 4.1:
-- Why GPUs
-- GPU architecture
-- CUDA
+### Module 3: Monitoring, Drift, and Interpretability
 
-### Lecture 4.2:
-- Pipelining data transfer and data processing
-- Profiling GPU code using NVIDIA nSight
+Explains how to observe and debug models after training. Covers experiment tracking, monitoring, drift detection, SHAP-based explanations, and Integrated Gradients.
 
-### Lecture 4.3:
-- Writing a custom CUDA Kernel using Triton
-- Matrix Mul
-- Softmax
+### Module 4: Information Retrieval and Embeddings
 
-## Module 5: Neural Network Training: Advanced Topics
-### Lecture 5.1: Memory usage and techniques to lower usage
-- Memory consumed by Neural Networks
-- Lowering memory usage using Activation Checkpointing and Gradient Accumulation
+Introduces retrieval metrics, lexical retrieval, sparse indexing, MinHash/LSH, semantic similarity, and dense retrieval using learned embeddings.
 
-### Lecture 5.2: Distributed Computing on CPUs
-- Multiprocessing
-- Streaming
+### Module 5: Neural Architectures and Transformers
 
-### Lecture 5.2: Distributed Training: Distributed Data Parallel
+Covers CNNs, normalization, residual learning, attention, tokenization, transformers, BERT/GPT-style pretraining, and decoding methods.
 
-### Lecture 5.3: Distributed Training: Fully Sharded Data Parallel
+### Module 6: Distributed Training on Multi-GPU and Multi-Node Clusters
 
-## Module 6: Language Modeling, Embeddings and VectorDB
-### Lecture 6.1: Language Modeling basics
-- N-grams, distributional hypothesis
-- Word embeddings (Word2Vec, GloVe)
-- Tokenization: Bytepair (BPE), Wordpiece
+Reserved for future material on DDP, FSDP, communication, checkpointing, and scaling training across multiple GPUs and nodes.
 
-### Lecture 6.2: Vector Databases
-- Indexing techniques
-- Precision/Recall trade-off
-- Popular VectorDB and evaluation criteria
+### Module 7: Reinforcement Learning
 
-## Module 7: Attention and Transformers
-Goal: Transition into the transformer era
+Reserved for future material on MDPs, policy/value methods, actor-critic algorithms, exploration, and RL for language models.
 
-### Lecture 7.1: Introduction to Attention
-- Motivation, soft alignment
-- Self-attention mechanism
+### Module 8: LLM Inference Systems 
 
-### Lecture 7.2: The Transformer Architecture (Part 1)
-- Encoder-Decoder Architecture
-- Multi-head self-attention
-- Positional Encodings
+Covers the design principles behind LLM serving systems and how they are implemented in vLLM. Includes building a simple vllm-lite inference server, that implements the core innovations in vLLM such as prefix caching and pre-fill decode disaggregation, paged attention and others.
 
-### Lecture 7.3: Pre-Training strategies
-- Causal LM vs Masked LM: GPT vs BERT strategies
-- Decoding Strategies in GPT: Beam Search, Top-K, Nuclear Sampling..
-- Task specific Heads: Text Classification 
+### Module 9: Quantization and Optimization
 
-### Lecture 7.4: Training Medium-Sized LMs
-- Pre-training medium-sized BERT model on GPUs
-- Finetuning
-- Parallelism: Data, Model
+Covers key techniques for quantization and optimization of neural networks, such as Activation Aware Quantization (AWQ), using hardware-specific numerical formats such as NVFP4 
 
-### Lecture 7.5: Training Medium-Sized LMs
-- Pre-training GPT2 style models
 
-## Module 8: Reinforcement Learning
-
-## Module 9: Interpretability/Explainability
-
-## Module 10: Hyperparameter Optimization
