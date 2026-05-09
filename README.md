@@ -17,6 +17,18 @@ This course is aimed at:
 
 Python familiarity is assumed. The early modules cover the mathematical background needed for the rest of the repository.
 
+## What you'll learn
+
+By the end of the course, students should have a practical understanding of both the mathematical foundations of deep learning and the systems used to train, optimize, and serve modern models.
+
+- connect theory with practice by building neural networks in Python, understanding forward and backward passes, and seeing how the mathematics of backpropagation appears in real implementations
+- develop the intuition needed to follow modern deep learning research, understand what the true innovation is in a new paper or system, and reason clearly about its practical implications without getting lost in buzzwords
+- build a solid understanding of information retrieval, embeddings, and vector databases, including both classical retrieval techniques and modern dense retrieval systems built on learned representations
+- understand the architecture and implementation details behind modern LLM serving systems such as vLLM, including attention kernels, KV cache management, continuous batching, prefix caching, and the design tradeoffs involved in high-throughput inference
+- gain a practical introduction to GPU architecture and CUDA, including how GPU execution differs from CPU execution and how to write simple CUDA kernels
+- understand the theory and practice behind supervised fine tuning and reinforcement learning, and work toward training and fine tuning large models such as GPT-20B on custom datasets
+- learn system-level techniques used to scale training and speed up inference, including DDP, FSDP, activation checkpointing, quantization, LoRA, and related optimization methods
+
 ## Repository Structure
 
 Most modules are organized into `class_x.y/` directories. Lecture folders typically contain:
@@ -62,5 +74,3 @@ Covers the design principles behind LLM serving systems and how they are impleme
 ### Module 9: Quantization and Optimization
 
 Covers key techniques for quantization and optimization of neural networks, such as Activation Aware Quantization (AWQ), using hardware-specific numerical formats such as NVFP4 
-
-
