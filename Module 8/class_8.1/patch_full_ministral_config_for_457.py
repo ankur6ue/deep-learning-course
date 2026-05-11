@@ -5,8 +5,8 @@ import json
 import shutil
 from pathlib import Path
 
-SRC = Path("/home/ankur/dev/models/Ministral-3-14B-Instruct-2512-BF16")
-DST = Path("/home/ankur/dev/models/Ministral-3-14B-Instruct-2512-BF16-PATCHED-457")
+SRC = Path("/home/ankur/dev/models/Ministral-3-8B-Instruct-2512-BF16")
+DST = Path("/home/ankur/dev/models/Ministral-3-8B-Instruct-2512-BF16-PATCHED-457")
 
 DST.mkdir(parents=True, exist_ok=True)
 

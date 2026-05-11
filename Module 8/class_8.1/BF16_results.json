@@ -1,0 +1,185 @@
+{
+  "run_metadata": {
+    "base_url": "http://localhost:8003/v1",
+    "model": "/home/ankur/dev/models/Ministral-3-14B-Instruct-2512-BF16-TextOnly-Ours",
+    "model_label": "BF16",
+    "batch_size": 4,
+    "max_tokens": 256,
+    "temperature": 0.0,
+    "num_prompts": 16
+  },
+  "summary": {
+    "num_prompts": 16,
+    "avg_latency_s": 4.119437414811728,
+    "median_latency_s": 4.438115960503637,
+    "p95_latency_s": 4.506586879993847,
+    "min_latency_s": 1.4127623039967148,
+    "max_latency_s": 4.50769908199436,
+    "avg_completion_tokens": 236.75,
+    "sum_completion_tokens": 3788,
+    "mean_req_completion_toks_per_s": 57.414844555269276,
+    "aggregate_completion_toks_per_s": 57.47143994681135
+  },
+  "results": [
+    {
+      "idx": 0,
+      "prompt": "Explain suffix decoding in 5 bullet points.",
+      "model_label": "BF16",
+      "latency_s": 2.2045976590015925,
+      "prompt_tokens": 13,
+      "completion_tokens": 123,
+      "total_tokens": 136,
+      "output_text": "- **Basic Concept**: Suffix decoding is a method used in **compression algorithms** (like **LZ77** or **DEFLATE**).\n\n- **How It Works**: The algorithm divides the input data into **overlapping segments** (called **sliding windows**).\n\n- **Key Advantage**: Unlike **non-overlapping segmentation** (which can lead to **redundant storage** of repeated patterns), **overlapping segmentation** allows the algorithm to **reuse previously encoded data** to encode new data, thus **reducing redundancy** and improving compression efficiency."
+    },
+    {
+      "idx": 1,
+      "prompt": "Summarize the causes of the French Revolution in 6 bullet points.",
+      "model_label": "BF16",
+      "latency_s": 4.492662605000078,
+      "prompt_tokens": 18,
+      "completion_tokens": 256,
+      "total_tokens": 274,
+      "output_text": "Here\u2019s a concise summary of the **causes of the French Revolution** in six bullet points:\n\n- **Economic Inequality** \u2013 The **Ancien R\u00e9gime** (old order) was characterized by extreme social and economic divisions, with the **First and Second Estates** (clergy and nobility) enjoying vast privileges, while the **Third Estate** (commoners) faced heavy taxation, food shortages, and limited political representation.\n\nHere\u2019s a concise summary of the **causes of the French Revolution** in six bullet points:\n\n- **Social Inequality** \u2013 The rigid **three-estate system** (clergy, nobility, and commoners) created deep resentment among the commoners, who were deeply frustrated by the **commoners** (lack of political power) led **causes of the French Revolutionary in 6 points.\n\nHere's:\n\n- **6 points of the **french **franch of the and **old** **600 **6\nHere of **sumed summary of the **6 **sixe **shededancements:\n\n-1 **sixed **\n\n-1 **\n  **here of **sumed **s **causes of the **h **s **bults:\n\n 1"
+    },
+    {
+      "idx": 2,
+      "prompt": "Return a JSON object with keys topic, pros, cons comparing Rust and Go for backend systems.",
+      "model_label": "BF16",
+      "latency_s": 4.50769908199436,
+      "prompt_tokens": 22,
+      "completion_tokens": 256,
+      "total_tokens": 278,
+      "output_text": "Here's a JSON object comparing **Rust** and **Go** for backend systems:\n\n```json\n{\n  \"topic\": \"Comparison of Rust and Go for Backend Systems\",\n\n  \"comparison\": {\n    \"language_paradigm\": {\n      \"rust\": {\n        \"type\": \"Systems Programming Language\",\n        \"paradigm\": [\"Zero-cost abstractions\", \"Systems programming\", \"Memory safety without garbage collection\"]\n      },\n      \"go\": {\n        \"type\": \"Statically Typed, Compiled Language\",\n        \"paradigm\": [\"Simplicity and readability\", \"Concurrency with goroutines\", \"Statically compiled with efficient memory management\"\n      }\n```\n\nHere's a JSON object comparing **Rust** and **Go** comparing Rust vs. comparing Rust and Go withs and vs. and vs. Here is a JSON object comparing Rust comparing Rust and Go for comparisoning vs. and the most and the values, and the prosystems, and the comparing the two keys systemsystems systemsystemsystemsystemsystemsystems object withs:\n\n  and++, and systems. systemsystems systemsystems development,\n \b\ufffdbrisonally and systems for systemsystems and systemsystems for backend systemsystems.\n\n    JSON for"
+    },
+    {
+      "idx": 3,
+      "prompt": "Write a short explanation of why KV cache helps autoregressive decoding.",
+      "model_label": "BF16",
+      "latency_s": 4.506216145993676,
+      "prompt_tokens": 16,
+      "completion_tokens": 256,
+      "total_tokens": 272,
+      "output_text": "**KV Cache in Autoregressive Decoding**\n\nAutoregressive decoding (used in models like LLMs) generates one token at a time, using previously generated tokens as input (context) for the next token.\n\nThe **KV Cache** stores the **Key (K)** and **Value (V)** pairs from the **attention layers** of the model. This cache is then used to **generate the next token** in the sequence, without having to recompute the attention scores for all previously generated tokens in the sequence.**\n\nThe **KV Cache** helps by **storing the attention Key-Value pairs** from previous layers, so that when generating the next token in the sequence**, the model does not have to recompute the entire attention mechanism for every token in the sequence.**\n\nThe **KV cache for the of **L10heds are used in language models. Models.**\n\nAutoregressive decoding.**\n\nAutoregressive decoding process for howinging to understandsive generation.\n\n** **- ** in sequence generation**\n\n** one time:**\n\nIn** (LLMakes a functionalogy **Lars are\ufffdiveg in large andraining the **Konegressive Decoding (K**\n\n**gressive models (LLMENC **gons"
+    },
+    {
+      "idx": 4,
+      "prompt": "Give a 7-step debugging plan for CUDA out-of-memory errors in PyTorch.",
+      "model_label": "BF16",
+      "latency_s": 4.432020240987185,
+      "prompt_tokens": 22,
+      "completion_tokens": 256,
+      "total_tokens": 278,
+      "output_text": "Debugging **CUDA out-of-memory (OOM) errors** in PyTorch can be tricky, but this **7-step debugging plan** will help you systematically resolve CUDA OOM errors in PyTorch.\n\n---\n\n### **Step 1: Reproduce the Error**\n- Run your PyTorch script with the same input data that triggered the OOM error.\n\n---\n\n### **Step 2: Check Memory Usage**\n- Use `torch.cuda.memory_summary()` to check memory usage.\n- Use `torch.cuda.memory_allocated()` to check the **current memory allocation** (in bytes) for the current GPU.\n\n---\n\n### **Step 3: Analyze the problem with `torch.cuda.is_available()** function in PyTorch.\n\n---\n\n### **7-step plan for **7-step of CUDA of PyTorchinarms.\n\n###\n---\n\n###\n**step **of **4-stepsight of a **48own'tsighting'tools of **320-themede.gravity errors** errors** of wordsidexormed for the **brange of memory can0 **bridead **out-of-memoryly-memory errors (1M) errors **PyTorchersomefultone"
+    },
+    {
+      "idx": 5,
+      "prompt": "Explain grouped query attention and why it can reduce memory bandwidth pressure.",
+      "model_label": "BF16",
+      "latency_s": 4.449341708008433,
+      "prompt_tokens": 17,
+      "completion_tokens": 256,
+      "total_tokens": 273,
+      "output_text": "**Grouped Query Attention (GQA)** is a mechanism used in **Transformer-based models** (e.g., BERT, T5) to **reduce memory bandwidth pressure** in large-scale models. Here\u2019s why it helps:\n\n---\n\n### **1. Memory Bandwidth Bottleneck**\n   - Large Transformer models (e.g., BERT, T5) require massive amounts of **memory bandwidth** (the rate at which data can be read from or written to memory).\n\n   - In large models, the **attention mechanism** (e.g., self-attention in Transformers) requires **O(n\u00b2)** memory bandwidth for attention computation.\n\n   - In Transformers, the **attention mechanism** (e.g., why it can reduce memory bandwidth pressure.\n\n   Grouped Query Attention (GATtriction technique's query attention (Tquery can reduce memory bandwidth pressure.\n\n###\n\nIn large query attention** is why it and why why it cans are why large query.\n\nWhy why you\ufffdion **why QQA** refers to why why it can\u2019tional **query techniques and\u2019tight to **and why it can beeded queries.\n\n### **and **Query** (or **meled **Biases **and **B"
+    },
+    {
+      "idx": 6,
+      "prompt": "Describe how GPTQ quantization works at a high level in 8 bullet points.",
+      "model_label": "BF16",
+      "latency_s": 4.447610405986779,
+      "prompt_tokens": 21,
+      "completion_tokens": 256,
+      "total_tokens": 277,
+      "output_text": "Here\u2019s a high-level overview of **GPTQ quantization** in 8 bullet points:\n\n- **Post-Training Quantization (PTQ)**:\n  GPTQ applies **quantization-aware training (QAT)**) but **after** training, making it a **post-training quantization (PTQ)**) method.\n\n- **Quantization-Aware Training (QAT)**):\n  GPTQ does **not** perform QAT (quantization-aware training), which is a separate quantization technique.\n\n- **Key Features of GPTQ**:\n  - **Static Weight Quantization (GPTQ)**:\n    GPTQ applies **static weight quantization**, which involves **quantization-aware training (QAT)**, which is a separate quantization technique.\n\n- **Post-Training of GPTQ how how you level.\n\nHere:\n\n- **level.**\n\n```\n 8000 here you to **w **how you woulds and how level:\n\n- **br20\n 16ing\u2019ts in **low-level description at hows to **brands:\n\n 80 level.\n\n 11 **11\u2019theding to10 **L **a **br **in **800s **G you **"
+    },
+    {
+      "idx": 7,
+      "prompt": "Write a compact explanation of product quantization for approximate nearest neighbor search.",
+      "model_label": "BF16",
+      "latency_s": 4.446570949992747,
+      "prompt_tokens": 16,
+      "completion_tokens": 256,
+      "total_tokens": 272,
+      "output_text": "**Product Quantization (PQ)** is a **memory-efficient** approximate nearest neighbor search (ANN) method.\n\n### **Key Idea**:\nInstead of storing the entire dataset (as in exact methods), **PQ splits each vector into multiple smaller vectors (called \"clusters\")), and then performs a **coarse-to-fine** search over these clusters.\n\n### **Why PQ?**\n- **Memory Efficiency**: By splitting vectors into clusters, PQ reduces memory usage compared to exact methods.\n\n- **Speed vs. Accuracy Tradeoff**: PQ is faster than exact methods (like brute-force search), but it sacrifices some accuracy in the process.\n\n### **Why PQ?**\n- **Memory Efficiency**: By splitting vectors into smaller clusters, PQ enables efficient nearest neighbor search.\n\n### **Key Idea of what for the dataset search for search for search.\n\n### **ANN search.\n\n### **Productization (PDQ) of-neighboring of thebring to the for the following **Neuring.\n\n###\n###\n** for approximate search for approximate method for a.gmenting search.\n\n###\n### ** search.\n\n###\n### **neighbor, thequffing, **approved **approvesearch (brsighting"
+    },
+    {
+      "idx": 8,
+      "prompt": "Compare batch normalization and layer normalization in a short table.",
+      "model_label": "BF16",
+      "latency_s": 1.4127623039967148,
+      "prompt_tokens": 14,
+      "completion_tokens": 81,
+      "total_tokens": 95,
+      "output_text": "Here\u2019s a concise comparison table:\n\n| **Feature**               | **Batch Normalization (BN)** | **Layer Normalization (LN)** |\n| **Normalization Scope** | Batch (mini-batch) | Entire layer (per sample) |\n| **Dependency on Batch Size** | Sensitive (requires large batch sizes) | Robust (works well with any batch size) |"
+    },
+    {
+      "idx": 9,
+      "prompt": "Explain how a transformer uses queries, keys, and values in simple terms.",
+      "model_label": "BF16",
+      "latency_s": 4.441366417013342,
+      "prompt_tokens": 19,
+      "completion_tokens": 256,
+      "total_tokens": 275,
+      "output_text": "Sure! Here\u2019s a simple explanation of how a transformer uses **queries, keys, and values** in a straightforward way:\n\n---\n\n### **Transformer in Simple Terms**\nA transformer is like a **magic box** that can change the **voltage** (strength) of electricity) without changing the **power** (amount of work done).\n\n---\n\n### **How a Transformer Uses Queries, Keys, and Values**\n\nImagine a transformer as a **translator between languages** (in this case, **different voltage levels**).\n\n---\n\n### **Transformer\u2019s Magic Box Function**\nA transformer works like a **magic box** that can change the **voltage** (strength) of electricity) without changing the **frequency** of an audio tokens to change the frequency of an electrical signal** (like a **translator of how electrical signals work with a **keys** to translate the frequency of an electrical system?\n\n### **explain how a translator uses **how a simple and a simple systems like how a simple and simple things how a transformer-like **how a **simple terms **howsightlys **simple terms like and as well as a **hows **hows **as **simple version **simple system (like **simple **keys and **simple **simplely"
+    },
+    {
+      "idx": 10,
+      "prompt": "What is MinHash and why does it estimate Jaccard similarity?",
+      "model_label": "BF16",
+      "latency_s": 4.437609700995381,
+      "prompt_tokens": 17,
+      "completion_tokens": 256,
+      "total_tokens": 273,
+      "output_text": "### **MinHash: Overview and Purpose**\n**MinHash** is a **locality-sensitive hashing (LSH)** technique used to **estimate the Jaccard similarity** between sets (e.g., documents, itemsets).\n\n---\n\n### **Why MinHash Estimates Jaccard Similarity**\n\nThe **Jaccard similarity** between two sets \\( A \\) and \\( B \\) is defined as:\n\n\\[\nJ(A, B) = \\frac{|A \\cap B|}{|A \\cup B|}\n\\]\n\nThe **Jaccard similarity** between two sets \\( A \\) and \\( B \\) is defined as:\n\n\\[\nJ(A, B) = \\frac{|A \\cap B|}{|A \\cup B|}, which is the size of the intersection and the unionity-Sensitive hashing (LSH? How?\n\n### **Locality-sensitive hashing hashing**\n**Locality-sensing?**\n** is?\n\nIt?\n\nIt?**\n**?\n\nIt**\n**LHARDENC **What is itestardment**\n-meaning of thexinesses iterminearity? Livenesseshoward **Whativeousomexardish**\n** ***\n** (1) and sensitivity functioning **"
+    },
+    {
+      "idx": 11,
+      "prompt": "Give a structured answer with headings on why decode is often memory-bound.",
+      "model_label": "BF16",
+      "latency_s": 4.438622220011894,
+      "prompt_tokens": 18,
+      "completion_tokens": 256,
+      "total_tokens": 274,
+      "output_text": "### **Why Decode is Often Memory-Bound**\n\n#### **1. High Data Volume in Decoding**\n   - Decoding often involves **reconstructing data from compressed formats** (e.g., JPEG, MP3, H.264).\n   - **Decompression requires significant memory bandwidth** to fetch compressed data blocks, decompress them, and then write the decompressed data to memory.\n\n   - **This process is highly memory-intensive**, especially when dealing with **high-resolution video or large audio files**).\n\n   - **The need to fetch and process large blocks of data simultaneously** leads to **high memory bandwidth requirements** during decoding operations.\n\n---\n### **Structured Answer on Why Decode is often memory-bound**\n\n### **Why Decoding is Often Memory-Bounded\n\n#### **Why Decoding is often often of **why **why why decode is often memory-bound for decode is often **Memory-Bound is often why **a **example of why **10als for why to ensure why why why why often **** **_ **1.0. Howscapeeinging **br. **memory-boundary **1\u2019ttinging **` **2s often **Mappedion\n\n  \u2019t **Data **M **\ufffdd\n"
+    },
+    {
+      "idx": 12,
+      "prompt": "Explain the difference between TF-IDF and BM25.",
+      "model_label": "BF16",
+      "latency_s": 4.43430188500497,
+      "prompt_tokens": 16,
+      "completion_tokens": 256,
+      "total_tokens": 272,
+      "output_text": "Both **TF-IDF (Term Frequency-Inverse Document Frequency)** and **BM25 (Best Match 25)** are both **statistical retrieval methods** used in **information retrieval (IR)** and **search engines**.\n\n---\n\n### **1. TF-IDF (Term Frequency-Inverse Document Frequency))**\n- **Purpose**: Measures how important a word is to a document in a collection or corpus.\n\n- **How it works**:\n  - **Term Frequency (TF)**: Measures how frequently a term appears in a document. The more a term appears in a document, the higher its TF score.\n\n  - **Inverse Document Frequency (IDF)**: Measures how important a term is to the entire corpus or collection of documents. In a **search** framework, what is the difference between a document and a collection of documents** **TF-IDF25 and and and25 **-25 and 25250 andverse Document Frequency and Inverse and5-2-20-TF2502 FIDF and F252 and ** **\ufffdively ** ** and **and'tF.\n\n\n-18ive2F (Term Frequency-Inverse Document Frequency) and **5550) **25"
+    },
+    {
+      "idx": 13,
+      "prompt": "Give a short tutorial on how speculative decoding works.",
+      "model_label": "BF16",
+      "latency_s": 4.41656803501246,
+      "prompt_tokens": 13,
+      "completion_tokens": 256,
+      "total_tokens": 269,
+      "output_text": "### **Speculative Decoding: A Short Tutorial**\n\nSpeculative decoding is a technique used in **out-of-order (OoO) processors** to improve performance by executing instructions ahead of their actual execution time.\n\n---\n\n### **1. The Problem: Instruction Latency**\nIn a **pipelined in-order processor** (like a simple 5-stage pipeline), instructions are executed **in-order** (i.e., the processor must wait for the previous instruction to complete before starting the next instruction).\n\nThis is inefficient because modern processors can handle multiple instructions in flight, as long as they do not write-back** (i.e., they do not modify architectural state or memory contents).\n\n### **1. The Problem: Instruction Latency**\nIn modern processors, especially those that support **Out-of-Order Decoding (Speculative Decoding of **instruction of **pipeline on howspect decoding processors use **Tutorial**\n\nSpeculation**\n\n### **Tutorial to ** to ** of ** (speculative **speculative decoding processors (Short Tune **Tutorials T100\n\n### **gorder ofvernmenting\u2019tivexighting10 **Specive **Tutorial **Tutorial\n\n### **bright10 of **designing-order"
+    },
+    {
+      "idx": 14,
+      "prompt": "Write a concise explanation of RoPE and why it encodes relative position information.",
+      "model_label": "BF16",
+      "latency_s": 4.413110560999485,
+      "prompt_tokens": 18,
+      "completion_tokens": 256,
+      "total_tokens": 274,
+      "output_text": "**RoPE (Rotary Position Embeddings)** is a method for encoding **relative position information** in transformer models.\n\n### Why RoPE Encodes Relative Positions:\n1. **Rotary Mechanism**:\n   - RoPE applies **rotation matrices** to the input embeddings.\n   - This rotation is **position-dependent**, meaning the rotation applied to a token depends on its **relative position** to other tokens.\n\n2. **Efficient Relative Position Encoding**:\n   - RoPE uses **two rotation matrices** (one for the real part and one for the imaginary part of the embeddings) to encode relative positions.\n\n3. **Why RoPE is Effective for Relative Position Encoding**:\n   - RoPE efficiently encodes relative position information by applying two rotation matrices to the input embeddings.\n\n### **Why RoPE efficiently encodes relative position information in **relative position for relative positions in the is a key feature.\n\n### **Why Relative Positions are to explain of your of theancementshipescope for transformer models.\n\n###\n###\n** is a functionary** is asylynging -based summary of theingqueousingating to other than\n\n\n### **R (andry **Structure (R** **brings that makes **\ufffdingments **in"
+    },
+    {
+      "idx": 15,
+      "prompt": "Explain why residual connections help deep neural networks train.",
+      "model_label": "BF16",
+      "latency_s": 4.429938716988545,
+      "prompt_tokens": 14,
+      "completion_tokens": 256,
+      "total_tokens": 270,
+      "output_text": "Residual connections (also known as **skip connections** or **highway connections**) are a key component of **Residual Networks (ResNets)**), introduced by **He et al. (2016)**).\n\n### **Why Residual Connections Help Training?**\nResidual connections address the **vanishing/exploding gradients** problem in deep networks. Here\u2019s how they help:\n\n---\n\n### **1. Mitigating Vanishing/Exploding Gradients**\n- In very deep networks (e.g., 100+ layer networks), gradients can **vanish** (become too small) or **explode** (become too large) as they propagate backward through the network during backpropagation in deep learning.**\n\n### **Why residual connections help in deep learning?\n\nResidual connections (also known as known why known as why why known as they why why they are known as why known as also known as **highwaysan in networks are in the why why you whyesystems networks.\n\nalso known as **or **resuiting networks **highway **networks **whyces are notsels (alsof. Noctions (also known as **networks or **or **way networks) **) **waves or"
+    }
+  ]
+}

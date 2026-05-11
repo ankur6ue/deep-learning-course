@@ -810,3 +810,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+import Q, K, V, sqrt, softmax, d
+
+S = Q @ K.T                    # Read Q, K from HBM, load matmul kernel, calculate S[N, N]
+S = S / sqrt(d)                # Write S to HBM
+P = softmax(S, dim=-1)         # Load softmax kernel, read S, calculate P, write to HBM
+O = P @ V                      # Read P, V from HBM, load matmul kernel, calculate O[N, H], write to HBM

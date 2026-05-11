@@ -6,7 +6,7 @@ Goals
 -----
 - Tutorial-first: small amount of code, easy to read.
 - Benchmark-first: capture stable timing and correctness checks.
-- Minimal dependencies: torch is required, triton / flash-attn are optional.
+- Minimal dependencies: torch is required, triton / flash-attn / flashinfer are optional.
 - Hardware agnostic: runs on whatever CUDA GPU is present and reports capabilities.
 
 First benchmark cases
@@ -19,18 +19,19 @@ First benchmark cases
 First backend set
 -----------------
 - torch_reference
-- sdpa (PyTorch scaled_dot_product_attention, mem-efficient path)
-- triton_reference (vLLM Triton unified attention kernel path)
+- triton_reference (via Triton tutorial kernel if available; otherwise skipped)
 - flash_attn (if importable and shape supported)
+- flashinfer (if importable and shape supported)
 
 Notes
 -----
 - This is intentionally forward-only and BF16-only for the first version.
-- The paged KV path is backend-specific in practice. `flash_attn` and
-  `triton_reference` use paged-cache style kernels; `sdpa` currently skips paged
-  cases in this harness.
-- The `triton_reference` path in this file is wired to vLLM's Triton unified
-  attention kernel implementation, while `sdpa` is explicitly PyTorch SDPA.
+- The paged KV path is backend-specific in practice. For v1, torch and Triton treat
+  paged KV as a gather into contiguous K/V before attention. FlashInfer can use its
+  native paged path when available.
+- The Triton path here is a placeholder wrapper because Triton's official fused
+  attention tutorial is not packaged as a stable pip API. The harness is written so
+  you can drop in a local Triton kernel later.
 """
 
 from __future__ import annotations
@@ -40,10 +41,12 @@ import dataclasses
 import importlib
 import json
 import math
+import os
 import platform
 import random
 import statistics
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -145,17 +148,6 @@ def default_cases() -> List[AttentionCase]:
             paged_kv=False,
         ),
         AttentionCase(
-            name="chunked_decode_contiguous_kv",
-            batch_size=32,
-            q_len=64,
-            kv_len=8192,
-            num_q_heads=16,
-            num_kv_heads=16,
-            head_dim=128,
-            causal=True,
-            paged_kv=False,
-        ),
-        AttentionCase(
             name="single_token_decode_paged_kv",
             batch_size=32,
             q_len=1,
@@ -195,14 +187,6 @@ class AttentionInputs:
     v_pages: Optional[torch.Tensor] = None
     page_table: Optional[torch.Tensor] = None
     valid_lens: Optional[torch.Tensor] = None
-    vllm_triton_q: Optional[torch.Tensor] = None
-    vllm_triton_k_cache: Optional[torch.Tensor] = None
-    vllm_triton_v_cache: Optional[torch.Tensor] = None
-    vllm_triton_block_table: Optional[torch.Tensor] = None
-    vllm_triton_seq_lens: Optional[torch.Tensor] = None
-    vllm_triton_cu_seqlens_q: Optional[torch.Tensor] = None
-    vllm_triton_k_descale: Optional[torch.Tensor] = None
-    vllm_triton_v_descale: Optional[torch.Tensor] = None
 
 
 
@@ -292,67 +276,6 @@ def paged_to_contiguous(
 
 
 
-def prepare_vllm_triton_inputs(case: AttentionCase, inp: AttentionInputs) -> None:
-    if inp.vllm_triton_q is not None:
-        return
-
-    B, Tq, Tk = case.batch_size, case.q_len, case.kv_len
-    Hq, Hkv, D = case.num_q_heads, case.num_kv_heads, case.head_dim
-
-    if Hq % Hkv != 0:
-        raise ValueError("num_q_heads must be divisible by num_kv_heads for Triton GQA.")
-    if case.page_size % 16 != 0:
-        raise ValueError("vLLM Triton requires page_size to be a multiple of 16.")
-
-    q_flat = inp.q.permute(0, 2, 1, 3).contiguous().view(B * Tq, Hq, D)
-    cu_seqlens_q = torch.arange(
-        0, (B + 1) * Tq, Tq, device=inp.q.device, dtype=torch.int32
-    )
-
-    if case.paged_kv:
-        if inp.k_pages is None or inp.v_pages is None or inp.page_table is None or inp.valid_lens is None:
-            raise RuntimeError("paged KV inputs are incomplete")
-        # [num_pages, Hkv, page_size, D] -> [num_pages, page_size, Hkv, D]
-        k_cache = inp.k_pages.permute(0, 2, 1, 3).contiguous()
-        v_cache = inp.v_pages.permute(0, 2, 1, 3).contiguous()
-        block_table = inp.page_table.to(dtype=torch.int32).contiguous()
-        seq_lens = inp.valid_lens.to(dtype=torch.int32).contiguous()
-    else:
-        block_size = case.page_size
-        if Tk % block_size != 0:
-            raise ValueError("For non-paged Triton path, kv_len must be divisible by page_size.")
-        blocks_per_seq = Tk // block_size
-        total_blocks = B * blocks_per_seq
-
-        # [B, Hkv, Tk, D] -> [num_blocks, block_size, Hkv, D]
-        k_bt = inp.k.permute(0, 2, 1, 3).contiguous()
-        v_bt = inp.v.permute(0, 2, 1, 3).contiguous()
-        k_cache = k_bt.view(B, blocks_per_seq, block_size, Hkv, D).view(
-            total_blocks, block_size, Hkv, D
-        ).contiguous()
-        v_cache = v_bt.view(B, blocks_per_seq, block_size, Hkv, D).view(
-            total_blocks, block_size, Hkv, D
-        ).contiguous()
-        block_table = torch.arange(
-            total_blocks, device=inp.q.device, dtype=torch.int32
-        ).view(B, blocks_per_seq)
-        seq_lens = torch.full((B,), Tk, device=inp.q.device, dtype=torch.int32)
-
-    descale_shape = (B, Hkv)
-    inp.vllm_triton_q = q_flat
-    inp.vllm_triton_k_cache = k_cache
-    inp.vllm_triton_v_cache = v_cache
-    inp.vllm_triton_block_table = block_table
-    inp.vllm_triton_seq_lens = seq_lens
-    inp.vllm_triton_cu_seqlens_q = cu_seqlens_q
-    inp.vllm_triton_k_descale = torch.ones(
-        descale_shape, device=inp.q.device, dtype=torch.float32
-    )
-    inp.vllm_triton_v_descale = torch.ones(
-        descale_shape, device=inp.q.device, dtype=torch.float32
-    )
-
-
 def torch_reference_attention(case: AttentionCase, inp: AttentionInputs) -> torch.Tensor:
     q = inp.q
     if case.paged_kv:
@@ -380,6 +303,10 @@ def torch_reference_attention(case: AttentionCase, inp: AttentionInputs) -> torc
 # -----------------------------------------------------------------------------
 # Backend wrappers
 # -----------------------------------------------------------------------------
+
+
+class BackendResult(Tuple):
+    pass
 
 
 class AttentionBackend:
@@ -410,99 +337,24 @@ class TritonReferenceBackend(AttentionBackend):
 
     def __init__(self) -> None:
         self.triton = None
-        self.unified_attention = None
+        self.triton_language = None
 
     def available(self) -> Tuple[bool, str]:
-        module_candidates = [
-            "vllm.v1.attention.ops.triton_unified_attention",
-            "vllm.attention.ops.triton_unified_attention",
-        ]
-        last_exc = None
-        for mod_name in module_candidates:
-            try:
-                self.triton = importlib.import_module("triton")
-                mod = importlib.import_module(mod_name)
-                self.unified_attention = getattr(mod, "unified_attention")
-                vllm = importlib.import_module("vllm")
-                return True, (
-                    f"vllm {getattr(vllm, '__version__', 'unknown')} + "
-                    f"triton {getattr(self.triton, '__version__', 'unknown')}"
-                )
-            except Exception as exc:
-                last_exc = exc
-        return False, f"vLLM Triton import failed: {last_exc}"
-
-    def supports(self, case: AttentionCase) -> Tuple[bool, str]:
-        if case.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-            return False, "vLLM Triton supports fp16/bf16/fp32"
-        if not case.causal:
-            return False, "vLLM unified_attention path here is causal-only"
-        if case.head_dim < 32:
-            return False, "vLLM Triton backend requires head_dim >= 32"
-        if case.num_q_heads % case.num_kv_heads != 0:
-            return False, "num_q_heads must be divisible by num_kv_heads"
-        if case.page_size % 16 != 0:
-            return False, "page_size must be a multiple of 16"
-        if (not case.paged_kv) and (case.kv_len % case.page_size != 0):
-            return False, "for non-paged mode, kv_len must be divisible by page_size"
-        return True, "ok"
-
-    def run(self, case: AttentionCase, inp: AttentionInputs) -> torch.Tensor:
-        if self.unified_attention is None:
-            raise RuntimeError("vLLM Triton unified_attention was not initialized")
-
-        prepare_vllm_triton_inputs(case, inp)
-        assert inp.vllm_triton_q is not None
-        assert inp.vllm_triton_k_cache is not None
-        assert inp.vllm_triton_v_cache is not None
-        assert inp.vllm_triton_block_table is not None
-        assert inp.vllm_triton_seq_lens is not None
-        assert inp.vllm_triton_cu_seqlens_q is not None
-        assert inp.vllm_triton_k_descale is not None
-        assert inp.vllm_triton_v_descale is not None
-
-        q_flat = inp.vllm_triton_q
-        out_flat = torch.empty_like(q_flat)
-        max_seqlen_k = int(inp.vllm_triton_seq_lens.max().item())
-        softmax_scale = 1.0 / math.sqrt(case.head_dim)
-
-        self.unified_attention(
-            q=q_flat,
-            k=inp.vllm_triton_k_cache,
-            v=inp.vllm_triton_v_cache,
-            out=out_flat,
-            cu_seqlens_q=inp.vllm_triton_cu_seqlens_q,
-            max_seqlen_q=case.q_len,
-            seqused_k=inp.vllm_triton_seq_lens,
-            max_seqlen_k=max_seqlen_k,
-            softmax_scale=softmax_scale,
-            causal=True,
-            window_size=(-1, -1),
-            block_table=inp.vllm_triton_block_table,
-            softcap=0.0,
-            q_descale=None,
-            k_descale=inp.vllm_triton_k_descale,
-            v_descale=inp.vllm_triton_v_descale,
-        )
-
-        out = out_flat.view(
-            case.batch_size, case.q_len, case.num_q_heads, case.head_dim
-        ).permute(0, 2, 1, 3).contiguous()
-        return out
-
-
-class SDPABackend(AttentionBackend):
-    name = "sdpa"
-
-    def available(self) -> Tuple[bool, str]:
-        return True, "builtin"
+        try:
+            self.triton = importlib.import_module("triton")
+            self.triton_language = importlib.import_module("triton.language")
+            return True, f"triton {getattr(self.triton, '__version__', 'unknown')}"
+        except Exception as exc:
+            return False, f"triton import failed: {exc}"
 
     def supports(self, case: AttentionCase) -> Tuple[bool, str]:
         if case.paged_kv:
-            return False, "sdpa backend does not implement native paged KV"
+            return False, "v1 Triton wrapper does not implement native paged KV"
         return True, "ok"
 
     def run(self, case: AttentionCase, inp: AttentionInputs) -> torch.Tensor:
+        # Run through PyTorch SDPA while forcing the memory-efficient kernel path.
+        # On CUDA this is the closest maintained Triton-style path in PyTorch.
         q = inp.q
         k = inp.k
         v = inp.v
@@ -514,11 +366,14 @@ class SDPABackend(AttentionBackend):
         q = q.contiguous()
         k = k.contiguous()
         v = v.contiguous()
+        # PyTorch SDPA's is_causal=True assumes query/key positions start together.
+        # For causal attention with q_len < kv_len (decode/chunked decode), we need
+        # an explicit offset causal mask to match the benchmark reference math.
         use_offset_causal_mask = case.causal and (q.shape[-2] != k.shape[-2])
         attn_mask = causal_mask(case.q_len, k.shape[-2], q.device) if use_offset_causal_mask else None
         use_causal_flag = case.causal and (not use_offset_causal_mask)
 
-        # Force PyTorch's memory-efficient SDPA implementation.
+        # Prefer the newer SDPA context manager API; keep a fallback for older torch.
         try:
             from torch.nn.attention import SDPBackend, sdpa_kernel  # type: ignore
 
@@ -636,6 +491,245 @@ class FlashAttnBackend(AttentionBackend):
             causal=case.causal,
         )
         return out.permute(0, 2, 1, 3).contiguous()
+
+
+class FlashInferBackend(AttentionBackend):
+    name = "flashinfer"
+
+    def __init__(self) -> None:
+        self.mod = None
+        self._ragged_prefill_plan_cache: Dict[Tuple[Any, ...], Tuple[Any, torch.Tensor]] = {}
+        # Cache the working prefill path per shape so benchmark iterations do not
+        # repeatedly pay exception/fallback overhead.
+        self._ragged_prefill_backend_choice: Dict[Tuple[Any, ...], str] = {}
+
+    def available(self) -> Tuple[bool, str]:
+        try:
+            self.mod = importlib.import_module("flashinfer")
+            return True, f"flashinfer {getattr(self.mod, '__version__', 'unknown')}"
+        except Exception as exc:
+            return False, f"flashinfer import failed: {exc}"
+
+    def supports(self, case: AttentionCase) -> Tuple[bool, str]:
+        if case.dtype != torch.bfloat16:
+            return False, "v1 only benchmarks BF16"
+        return True, "ok"
+
+    def run(self, case: AttentionCase, inp: AttentionInputs) -> torch.Tensor:
+        if self.mod is None:
+            raise RuntimeError("flashinfer module is not initialized")
+
+        decode_mod = getattr(self.mod, "decode", None)
+        prefill_mod = getattr(self.mod, "prefill", None)
+        if decode_mod is None or prefill_mod is None:
+            raise RuntimeError("flashinfer.decode or flashinfer.prefill module not found")
+
+        def is_mixed_cudart_error(exc: Exception) -> bool:
+            return "Multiple libcudart libraries found" in str(exc)
+
+        def run_paged_decode_fallback() -> torch.Tensor:
+            single_decode_fn = getattr(decode_mod, "single_decode_with_kv_cache", None)
+            if single_decode_fn is None:
+                raise RuntimeError(
+                    "flashinfer.decode.single_decode_with_kv_cache not found "
+                    "(needed as fallback when cuDNN paged decode is unavailable)"
+                )
+            if inp.k_pages is None or inp.v_pages is None or inp.page_table is None or inp.valid_lens is None:
+                raise RuntimeError("paged KV inputs are incomplete")
+
+            out_list = []
+            for b in range(case.batch_size):
+                q_b = inp.q[b, :, 0, :]  # [Hq, D]
+                page_idx = inp.page_table[b].long()
+                kv_len = int(inp.valid_lens[b].item())
+
+                k_b = inp.k_pages.index_select(0, page_idx).permute(1, 0, 2, 3).contiguous()
+                v_b = inp.v_pages.index_select(0, page_idx).permute(1, 0, 2, 3).contiguous()
+                k_b = k_b.view(case.num_kv_heads, -1, case.head_dim)[:, :kv_len, :].permute(1, 0, 2).contiguous()
+                v_b = v_b.view(case.num_kv_heads, -1, case.head_dim)[:, :kv_len, :].permute(1, 0, 2).contiguous()
+
+                out_b = single_decode_fn(
+                    q=q_b,
+                    k=k_b,
+                    v=v_b,
+                    kv_layout="NHD",
+                    pos_encoding_mode="NONE",
+                )
+                if isinstance(out_b, tuple):
+                    out_b = out_b[0]
+                out_list.append(out_b)
+            return torch.stack(out_list, dim=0).unsqueeze(2)  # [B, Hq, 1, D]
+
+        def run_single_prefill_fallback() -> torch.Tensor:
+            single_prefill_fn = getattr(prefill_mod, "single_prefill_with_kv_cache", None)
+            if single_prefill_fn is None:
+                raise RuntimeError(
+                    "flashinfer.prefill.single_prefill_with_kv_cache not found "
+                    "(needed as fallback when cuDNN prefill is unavailable)"
+                )
+
+            out_list = []
+            for b in range(case.batch_size):
+                q_b = inp.q[b].permute(1, 0, 2).contiguous()  # [Tq, Hq, D]
+                k_b = inp.k[b].permute(1, 0, 2).contiguous()  # [Tk, Hkv, D]
+                v_b = inp.v[b].permute(1, 0, 2).contiguous()  # [Tk, Hkv, D]
+                out_b = single_prefill_fn(
+                    q=q_b,
+                    k=k_b,
+                    v=v_b,
+                    kv_layout="NHD",
+                    pos_encoding_mode="NONE",
+                    causal=case.causal,
+                )
+                if isinstance(out_b, tuple):
+                    out_b = out_b[0]
+                out_list.append(out_b)
+            return torch.stack(out_list, dim=0)
+
+        def run_ragged_batch_prefill_wrapper(backend_name: str) -> torch.Tensor:
+            wrapper_cls = getattr(self.mod, "BatchPrefillWithRaggedKVCacheWrapper", None)
+            if wrapper_cls is None:
+                raise RuntimeError("flashinfer.BatchPrefillWithRaggedKVCacheWrapper not found")
+
+            B = case.batch_size
+            Tq = case.q_len
+            Tk = case.kv_len
+            cache_key = (
+                str(inp.q.device),
+                B,
+                Tq,
+                Tk,
+                case.num_q_heads,
+                case.num_kv_heads,
+                case.head_dim,
+                case.causal,
+                str(case.dtype),
+                backend_name,
+            )
+            if cache_key not in self._ragged_prefill_plan_cache:
+                workspace = torch.empty(128 * 1024 * 1024, device=inp.q.device, dtype=torch.uint8)
+                wrapper = wrapper_cls(workspace, "NHD", backend=backend_name)
+                qo_indptr = torch.arange(0, (B + 1) * Tq, Tq, device=inp.q.device, dtype=torch.int32)
+                kv_indptr = torch.arange(0, (B + 1) * Tk, Tk, device=inp.q.device, dtype=torch.int32)
+                # FlashInfer plan docs specify seq_lens/seq_lens_q as uint32.
+                seq_lens_q = torch.full((B,), Tq, device=inp.q.device, dtype=torch.uint32)
+                seq_lens_kv = torch.full((B,), Tk, device=inp.q.device, dtype=torch.uint32)
+                wrapper.plan(
+                    qo_indptr=qo_indptr,
+                    kv_indptr=kv_indptr,
+                    num_qo_heads=case.num_q_heads,
+                    num_kv_heads=case.num_kv_heads,
+                    head_dim_qk=case.head_dim,
+                    causal=case.causal,
+                    q_data_type=case.dtype,
+                    kv_data_type=case.dtype,
+                    o_data_type=case.dtype,
+                    seq_lens=seq_lens_kv,
+                    seq_lens_q=seq_lens_q,
+                    max_token_per_sequence=Tq,
+                    max_sequence_kv=Tk,
+                )
+                self._ragged_prefill_plan_cache[cache_key] = (wrapper, workspace)
+
+            wrapper, _workspace = self._ragged_prefill_plan_cache[cache_key]
+            q = inp.q.permute(0, 2, 1, 3).reshape(B * Tq, case.num_q_heads, case.head_dim).contiguous()
+            k = inp.k.permute(0, 2, 1, 3).reshape(B * Tk, case.num_kv_heads, case.head_dim).contiguous()
+            v = inp.v.permute(0, 2, 1, 3).reshape(B * Tk, case.num_kv_heads, case.head_dim).contiguous()
+            out = wrapper.run(q=q, k=k, v=v, return_lse=False)
+            if isinstance(out, tuple):
+                out = out[0]
+            return out.reshape(B, Tq, case.num_q_heads, case.head_dim).permute(0, 2, 1, 3).contiguous()
+
+        if case.paged_kv:
+            if not case.is_decode:
+                raise RuntimeError("v1 FlashInfer paged path is only implemented for decode")
+
+            batch_decode_fn = getattr(decode_mod, "cudnn_batch_decode_with_kv_cache", None)
+            if batch_decode_fn is None:
+                return run_paged_decode_fallback()
+
+            if inp.k_pages is None or inp.v_pages is None or inp.page_table is None or inp.valid_lens is None:
+                raise RuntimeError("paged KV inputs are incomplete")
+
+            q = inp.q[:, :, 0, :]  # [B, Hq, D]
+
+            actual_seq_lens_kv = inp.valid_lens.to(dtype=torch.int32, device="cpu")
+            block_tables = inp.page_table.to(dtype=torch.int32)
+
+            try:
+                out = batch_decode_fn(
+                    q=q,
+                    k_cache=inp.k_pages,
+                    v_cache=inp.v_pages,
+                    actual_seq_lens_kv=actual_seq_lens_kv,
+                    block_tables=block_tables,
+                )
+            except Exception as exc:
+                if not is_mixed_cudart_error(exc):
+                    raise
+                return run_paged_decode_fallback()
+            return out.unsqueeze(2)  # [B, Hq, 1, D]
+
+        if case.is_decode:
+            single_decode_fn = getattr(decode_mod, "single_decode_with_kv_cache", None)
+            if single_decode_fn is None:
+                raise RuntimeError("flashinfer.decode.single_decode_with_kv_cache not found")
+
+            out_list = []
+            for b in range(case.batch_size):
+                q_b = inp.q[b, :, 0, :]             # [Hq, D]
+                k_b = inp.k[b].permute(1, 0, 2)     # [Tk, Hkv, D]
+                v_b = inp.v[b].permute(1, 0, 2)     # [Tk, Hkv, D]
+
+                out_b = single_decode_fn(
+                    q=q_b,
+                    k=k_b,
+                    v=v_b,
+                    kv_layout="NHD",
+                    pos_encoding_mode="NONE",
+                )
+                if isinstance(out_b, tuple):
+                    out_b = out_b[0]
+                out_list.append(out_b)
+
+            return torch.stack(out_list, dim=0).unsqueeze(2)  # [B, Hq, 1, D]
+
+        prefill_runtime_key = (
+            str(inp.q.device),
+            case.batch_size,
+            case.q_len,
+            case.kv_len,
+            case.num_q_heads,
+            case.num_kv_heads,
+            case.head_dim,
+            case.causal,
+            str(case.dtype),
+        )
+        chosen_backend = self._ragged_prefill_backend_choice.get(prefill_runtime_key)
+        if chosen_backend == "single_prefill":
+            out = run_single_prefill_fallback()
+            return out.permute(0, 2, 1, 3).contiguous()
+        if chosen_backend in {"cudnn", "auto"}:
+            return run_ragged_batch_prefill_wrapper(chosen_backend)
+
+        try:
+            out = run_ragged_batch_prefill_wrapper("cudnn")
+            self._ragged_prefill_backend_choice[prefill_runtime_key] = "cudnn"
+            return out
+        except Exception as cudnn_exc:
+            try:
+                out = run_ragged_batch_prefill_wrapper("auto")
+                print(f"can't use batch prefill cudnn ({cudnn_exc}).. using auto")
+                self._ragged_prefill_backend_choice[prefill_runtime_key] = "auto"
+                return out
+            except Exception as auto_exc:
+                print(
+                    f"can't use batch prefill cudnn ({cudnn_exc}) and auto ({auto_exc}).. "
+                    "reverting to single prefill"
+                )
+                self._ragged_prefill_backend_choice[prefill_runtime_key] = "single_prefill"
+                out = run_single_prefill_fallback()
+                return out.permute(0, 2, 1, 3).contiguous()
 
 
 # -----------------------------------------------------------------------------
@@ -827,7 +921,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--case", type=str, default="all",
                         choices=["all", "dense_causal_prefill", "single_token_decode_contiguous_kv",
-                                 "chunked_decode_contiguous_kv",
                                  "single_token_decode_paged_kv", "gqa_decode"])
     parser.add_argument("--json_out", type=str, default="")
     return parser.parse_args()
@@ -851,8 +944,8 @@ def main() -> None:
 
     backends: List[AttentionBackend] = [
         TorchReferenceBackend(),
-        SDPABackend(),
         FlashAttnBackend(),
+        FlashInferBackend(),
         TritonReferenceBackend(),
     ]
 

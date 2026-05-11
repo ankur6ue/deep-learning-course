@@ -1,0 +1,861 @@
+{
+  "run_metadata": {
+    "base_url": "http://localhost:8000/v1",
+    "model": "/home/ankur/dev/models/gpt-oss-20b",
+    "model_label": "mxfp4",
+    "batch_size": 4,
+    "max_tokens": 256,
+    "temperature": 0.0,
+    "num_prompts": 10,
+    "seed": 12345,
+    "instruction_file": "instruction.txt",
+    "categories_only": false,
+    "merchants_only": false
+  },
+  "prompt_specs": [
+    {
+      "idx": 0,
+      "kind": "merchant",
+      "months": [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May"
+      ],
+      "items": [
+        "Amazon",
+        "Uber",
+        "WholeFoods",
+        "Netflix",
+        "Starbucks",
+        "Target",
+        "Delta",
+        "Shell",
+        "Apple",
+        "Airbnb"
+      ],
+      "values": {
+        "Amazon": {
+          "Jan": 215,
+          "Feb": 252,
+          "Mar": 293,
+          "Apr": 373,
+          "May": 430
+        },
+        "Uber": {
+          "Jan": 121,
+          "Feb": 169,
+          "Mar": 137,
+          "Apr": 188,
+          "May": 187
+        },
+        "WholeFoods": {
+          "Jan": 270,
+          "Feb": 226,
+          "Mar": 193,
+          "Apr": 153,
+          "May": 128
+        },
+        "Netflix": {
+          "Jan": 19,
+          "Feb": 23,
+          "Mar": 28,
+          "Apr": 32,
+          "May": 34
+        },
+        "Starbucks": {
+          "Jan": 127,
+          "Feb": 132,
+          "Mar": 154,
+          "Apr": 125,
+          "May": 126
+        },
+        "Target": {
+          "Jan": 197,
+          "Feb": 174,
+          "Mar": 165,
+          "Apr": 152,
+          "May": 133
+        },
+        "Delta": {
+          "Jan": 192,
+          "Feb": 101,
+          "Mar": 218,
+          "Apr": 248,
+          "May": 58
+        },
+        "Shell": {
+          "Jan": 293,
+          "Feb": 300,
+          "Mar": 298,
+          "Apr": 305,
+          "May": 307
+        },
+        "Apple": {
+          "Jan": 146,
+          "Feb": 34,
+          "Mar": 0,
+          "Apr": 6,
+          "May": 0
+        },
+        "Airbnb": {
+          "Jan": 187,
+          "Feb": 131,
+          "Mar": 88,
+          "Apr": 5,
+          "May": 75
+        }
+      },
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: merchant-level spending\n\nJan: Amazon $215, Uber $121, WholeFoods $270, Netflix $19, Starbucks $127, Target $197, Delta $192, Shell $293, Apple $146, Airbnb $187\nFeb: Amazon $252, Uber $169, WholeFoods $226, Netflix $23, Starbucks $132, Target $174, Delta $101, Shell $300, Apple $34, Airbnb $131\nMar: Amazon $293, Uber $137, WholeFoods $193, Netflix $28, Starbucks $154, Target $165, Delta $218, Shell $298, Apple $0, Airbnb $88\nApr: Amazon $373, Uber $188, WholeFoods $153, Netflix $32, Starbucks $125, Target $152, Delta $248, Shell $305, Apple $6, Airbnb $5\nMay: Amazon $430, Uber $187, WholeFoods $128, Netflix $34, Starbucks $126, Target $133, Delta $58, Shell $307, Apple $0, Airbnb $75\n\nPlease summarize how each item changed month over month, including dollar and percentage changes."
+    },
+    {
+      "idx": 1,
+      "kind": "merchant",
+      "months": [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr"
+      ],
+      "items": [
+        "Amazon",
+        "Uber",
+        "WholeFoods",
+        "Netflix",
+        "Starbucks",
+        "Target",
+        "Delta",
+        "Shell",
+        "Apple",
+        "Airbnb"
+      ],
+      "values": {
+        "Amazon": {
+          "Jan": 44,
+          "Feb": 57,
+          "Mar": 28,
+          "Apr": 0
+        },
+        "Uber": {
+          "Jan": 145,
+          "Feb": 152,
+          "Mar": 175,
+          "Apr": 206
+        },
+        "WholeFoods": {
+          "Jan": 57,
+          "Feb": 79,
+          "Mar": 91,
+          "Apr": 84
+        },
+        "Netflix": {
+          "Jan": 15,
+          "Feb": 14,
+          "Mar": 14,
+          "Apr": 13
+        },
+        "Starbucks": {
+          "Jan": 232,
+          "Feb": 245,
+          "Mar": 244,
+          "Apr": 231
+        },
+        "Target": {
+          "Jan": 71,
+          "Feb": 76,
+          "Mar": 78,
+          "Apr": 94
+        },
+        "Delta": {
+          "Jan": 0,
+          "Feb": 0,
+          "Mar": 3,
+          "Apr": 234
+        },
+        "Shell": {
+          "Jan": 128,
+          "Feb": 104,
+          "Mar": 104,
+          "Apr": 120
+        },
+        "Apple": {
+          "Jan": 5,
+          "Feb": 0,
+          "Mar": 0,
+          "Apr": 0
+        },
+        "Airbnb": {
+          "Jan": 52,
+          "Feb": 55,
+          "Mar": 60,
+          "Apr": 246
+        }
+      },
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: merchant-level spending\n\nJan: Amazon $44, Uber $145, WholeFoods $57, Netflix $15, Starbucks $232, Target $71, Delta $0, Shell $128, Apple $5, Airbnb $52\nFeb: Amazon $57, Uber $152, WholeFoods $79, Netflix $14, Starbucks $245, Target $76, Delta $0, Shell $104, Apple $0, Airbnb $55\nMar: Amazon $28, Uber $175, WholeFoods $91, Netflix $14, Starbucks $244, Target $78, Delta $3, Shell $104, Apple $0, Airbnb $60\nApr: Amazon $0, Uber $206, WholeFoods $84, Netflix $13, Starbucks $231, Target $94, Delta $234, Shell $120, Apple $0, Airbnb $246\n\nPlease summarize how each item changed month over month, including dollar and percentage changes."
+    },
+    {
+      "idx": 2,
+      "kind": "merchant",
+      "months": [
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec"
+      ],
+      "items": [
+        "Amazon",
+        "Uber",
+        "WholeFoods",
+        "Netflix",
+        "Starbucks",
+        "Target",
+        "Delta",
+        "Shell",
+        "Apple",
+        "Airbnb"
+      ],
+      "values": {
+        "Amazon": {
+          "Sep": 316,
+          "Oct": 328,
+          "Nov": 329,
+          "Dec": 337
+        },
+        "Uber": {
+          "Sep": 191,
+          "Oct": 187,
+          "Nov": 182,
+          "Dec": 164
+        },
+        "WholeFoods": {
+          "Sep": 150,
+          "Oct": 174,
+          "Nov": 200,
+          "Dec": 240
+        },
+        "Netflix": {
+          "Sep": 13,
+          "Oct": 12,
+          "Nov": 11,
+          "Dec": 10
+        },
+        "Starbucks": {
+          "Sep": 224,
+          "Oct": 271,
+          "Nov": 355,
+          "Dec": 433
+        },
+        "Target": {
+          "Sep": 104,
+          "Oct": 98,
+          "Nov": 135,
+          "Dec": 177
+        },
+        "Delta": {
+          "Sep": 35,
+          "Oct": 22,
+          "Nov": 25,
+          "Dec": 1
+        },
+        "Shell": {
+          "Sep": 232,
+          "Oct": 224,
+          "Nov": 201,
+          "Dec": 186
+        },
+        "Apple": {
+          "Sep": 107,
+          "Oct": 191,
+          "Nov": 212,
+          "Dec": 271
+        },
+        "Airbnb": {
+          "Sep": 160,
+          "Oct": 202,
+          "Nov": 222,
+          "Dec": 235
+        }
+      },
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: merchant-level spending\n\nSep: Amazon $316, Uber $191, WholeFoods $150, Netflix $13, Starbucks $224, Target $104, Delta $35, Shell $232, Apple $107, Airbnb $160\nOct: Amazon $328, Uber $187, WholeFoods $174, Netflix $12, Starbucks $271, Target $98, Delta $22, Shell $224, Apple $191, Airbnb $202\nNov: Amazon $329, Uber $182, WholeFoods $200, Netflix $11, Starbucks $355, Target $135, Delta $25, Shell $201, Apple $212, Airbnb $222\nDec: Amazon $337, Uber $164, WholeFoods $240, Netflix $10, Starbucks $433, Target $177, Delta $1, Shell $186, Apple $271, Airbnb $235\n\nPlease summarize how each item changed month over month, including dollar and percentage changes."
+    },
+    {
+      "idx": 3,
+      "kind": "category",
+      "months": [
+        "Apr",
+        "May",
+        "Jun"
+      ],
+      "items": [
+        "Groceries",
+        "Travel",
+        "Dining",
+        "Gas",
+        "Entertainment",
+        "Shopping"
+      ],
+      "values": {
+        "Groceries": {
+          "Apr": 490,
+          "May": 541,
+          "Jun": 579
+        },
+        "Travel": {
+          "Apr": 386,
+          "May": 336,
+          "Jun": 306
+        },
+        "Dining": {
+          "Apr": 474,
+          "May": 486,
+          "Jun": 506
+        },
+        "Gas": {
+          "Apr": 501,
+          "May": 613,
+          "Jun": 760
+        },
+        "Entertainment": {
+          "Apr": 578,
+          "May": 629,
+          "Jun": 588
+        },
+        "Shopping": {
+          "Apr": 158,
+          "May": 205,
+          "Jun": 285
+        }
+      },
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: category-level spending\n\nApr: Groceries $490, Travel $386, Dining $474, Gas $501, Entertainment $578, Shopping $158\nMay: Groceries $541, Travel $336, Dining $486, Gas $613, Entertainment $629, Shopping $205\nJun: Groceries $579, Travel $306, Dining $506, Gas $760, Entertainment $588, Shopping $285\n\nPlease summarize how each item changed month over month, including dollar and percentage changes."
+    },
+    {
+      "idx": 4,
+      "kind": "merchant",
+      "months": [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr"
+      ],
+      "items": [
+        "Amazon",
+        "Uber",
+        "WholeFoods",
+        "Netflix",
+        "Starbucks",
+        "Target",
+        "Delta",
+        "Shell",
+        "Apple",
+        "Airbnb"
+      ],
+      "values": {
+        "Amazon": {
+          "Jan": 201,
+          "Feb": 222,
+          "Mar": 145,
+          "Apr": 122
+        },
+        "Uber": {
+          "Jan": 52,
+          "Feb": 71,
+          "Mar": 56,
+          "Apr": 38
+        },
+        "WholeFoods": {
+          "Jan": 150,
+          "Feb": 133,
+          "Mar": 108,
+          "Apr": 79
+        },
+        "Netflix": {
+          "Jan": 16,
+          "Feb": 14,
+          "Mar": 13,
+          "Apr": 11
+        },
+        "Starbucks": {
+          "Jan": 163,
+          "Feb": 101,
+          "Mar": 110,
+          "Apr": 73
+        },
+        "Target": {
+          "Jan": 293,
+          "Feb": 303,
+          "Mar": 344,
+          "Apr": 355
+        },
+        "Delta": {
+          "Jan": 202,
+          "Feb": 482,
+          "Mar": 554,
+          "Apr": 600
+        },
+        "Shell": {
+          "Jan": 304,
+          "Feb": 290,
+          "Mar": 255,
+          "Apr": 227
+        },
+        "Apple": {
+          "Jan": 90,
+          "Feb": 6,
+          "Mar": 42,
+          "Apr": 0
+        },
+        "Airbnb": {
+          "Jan": 68,
+          "Feb": 112,
+          "Mar": 2,
+          "Apr": 4
+        }
+      },
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: merchant-level spending\n\nJan: Amazon $201, Uber $52, WholeFoods $150, Netflix $16, Starbucks $163, Target $293, Delta $202, Shell $304, Apple $90, Airbnb $68\nFeb: Amazon $222, Uber $71, WholeFoods $133, Netflix $14, Starbucks $101, Target $303, Delta $482, Shell $290, Apple $6, Airbnb $112\nMar: Amazon $145, Uber $56, WholeFoods $108, Netflix $13, Starbucks $110, Target $344, Delta $554, Shell $255, Apple $42, Airbnb $2\nApr: Amazon $122, Uber $38, WholeFoods $79, Netflix $11, Starbucks $73, Target $355, Delta $600, Shell $227, Apple $0, Airbnb $4\n\nPlease summarize how each item changed month over month, including dollar and percentage changes."
+    },
+    {
+      "idx": 5,
+      "kind": "category",
+      "months": [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr"
+      ],
+      "items": [
+        "Groceries",
+        "Travel",
+        "Dining",
+        "Gas",
+        "Entertainment",
+        "Shopping"
+      ],
+      "values": {
+        "Groceries": {
+          "Jan": 217,
+          "Feb": 136,
+          "Mar": 156,
+          "Apr": 90
+        },
+        "Travel": {
+          "Jan": 353,
+          "Feb": 428,
+          "Mar": 509,
+          "Apr": 603
+        },
+        "Dining": {
+          "Jan": 269,
+          "Feb": 338,
+          "Mar": 394,
+          "Apr": 465
+        },
+        "Gas": {
+          "Jan": 510,
+          "Feb": 449,
+          "Mar": 398,
+          "Apr": 370
+        },
+        "Entertainment": {
+          "Jan": 276,
+          "Feb": 297,
+          "Mar": 321,
+          "Apr": 337
+        },
+        "Shopping": {
+          "Jan": 173,
+          "Feb": 196,
+          "Mar": 201,
+          "Apr": 222
+        }
+      },
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: category-level spending\n\nJan: Groceries $217, Travel $353, Dining $269, Gas $510, Entertainment $276, Shopping $173\nFeb: Groceries $136, Travel $428, Dining $338, Gas $449, Entertainment $297, Shopping $196\nMar: Groceries $156, Travel $509, Dining $394, Gas $398, Entertainment $321, Shopping $201\nApr: Groceries $90, Travel $603, Dining $465, Gas $370, Entertainment $337, Shopping $222\n\nPlease summarize how each item changed month over month, including dollar and percentage changes."
+    },
+    {
+      "idx": 6,
+      "kind": "category",
+      "months": [
+        "Oct",
+        "Nov",
+        "Dec"
+      ],
+      "items": [
+        "Groceries",
+        "Travel",
+        "Dining",
+        "Gas",
+        "Entertainment",
+        "Shopping"
+      ],
+      "values": {
+        "Groceries": {
+          "Oct": 212,
+          "Nov": 191,
+          "Dec": 184
+        },
+        "Travel": {
+          "Oct": 219,
+          "Nov": 246,
+          "Dec": 264
+        },
+        "Dining": {
+          "Oct": 326,
+          "Nov": 310,
+          "Dec": 295
+        },
+        "Gas": {
+          "Oct": 486,
+          "Nov": 508,
+          "Dec": 554
+        },
+        "Entertainment": {
+          "Oct": 169,
+          "Nov": 216,
+          "Dec": 258
+        },
+        "Shopping": {
+          "Oct": 404,
+          "Nov": 469,
+          "Dec": 533
+        }
+      },
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: category-level spending\n\nOct: Groceries $212, Travel $219, Dining $326, Gas $486, Entertainment $169, Shopping $404\nNov: Groceries $191, Travel $246, Dining $310, Gas $508, Entertainment $216, Shopping $469\nDec: Groceries $184, Travel $264, Dining $295, Gas $554, Entertainment $258, Shopping $533\n\nPlease summarize how each item changed month over month, including dollar and percentage changes."
+    },
+    {
+      "idx": 7,
+      "kind": "category",
+      "months": [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May"
+      ],
+      "items": [
+        "Groceries",
+        "Travel",
+        "Dining",
+        "Gas",
+        "Entertainment",
+        "Shopping"
+      ],
+      "values": {
+        "Groceries": {
+          "Jan": 249,
+          "Feb": 246,
+          "Mar": 246,
+          "Apr": 244,
+          "May": 174
+        },
+        "Travel": {
+          "Jan": 215,
+          "Feb": 215,
+          "Mar": 211,
+          "Apr": 246,
+          "May": 282
+        },
+        "Dining": {
+          "Jan": 285,
+          "Feb": 339,
+          "Mar": 374,
+          "Apr": 435,
+          "May": 491
+        },
+        "Gas": {
+          "Jan": 374,
+          "Feb": 298,
+          "Mar": 246,
+          "Apr": 191,
+          "May": 155
+        },
+        "Entertainment": {
+          "Jan": 187,
+          "Feb": 190,
+          "Mar": 191,
+          "Apr": 183,
+          "May": 201
+        },
+        "Shopping": {
+          "Jan": 341,
+          "Feb": 346,
+          "Mar": 333,
+          "Apr": 348,
+          "May": 344
+        }
+      },
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: category-level spending\n\nJan: Groceries $249, Travel $215, Dining $285, Gas $374, Entertainment $187, Shopping $341\nFeb: Groceries $246, Travel $215, Dining $339, Gas $298, Entertainment $190, Shopping $346\nMar: Groceries $246, Travel $211, Dining $374, Gas $246, Entertainment $191, Shopping $333\nApr: Groceries $244, Travel $246, Dining $435, Gas $191, Entertainment $183, Shopping $348\nMay: Groceries $174, Travel $282, Dining $491, Gas $155, Entertainment $201, Shopping $344\n\nPlease summarize how each item changed month over month, including dollar and percentage changes."
+    },
+    {
+      "idx": 8,
+      "kind": "category",
+      "months": [
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct"
+      ],
+      "items": [
+        "Groceries",
+        "Travel",
+        "Dining",
+        "Gas",
+        "Entertainment",
+        "Shopping"
+      ],
+      "values": {
+        "Groceries": {
+          "Jun": 491,
+          "Jul": 428,
+          "Aug": 340,
+          "Sep": 327,
+          "Oct": 294
+        },
+        "Travel": {
+          "Jun": 416,
+          "Jul": 430,
+          "Aug": 425,
+          "Sep": 428,
+          "Oct": 452
+        },
+        "Dining": {
+          "Jun": 516,
+          "Jul": 447,
+          "Aug": 403,
+          "Sep": 358,
+          "Oct": 315
+        },
+        "Gas": {
+          "Jun": 290,
+          "Jul": 247,
+          "Aug": 244,
+          "Sep": 258,
+          "Oct": 269
+        },
+        "Entertainment": {
+          "Jun": 274,
+          "Jul": 223,
+          "Aug": 187,
+          "Sep": 166,
+          "Oct": 161
+        },
+        "Shopping": {
+          "Jun": 355,
+          "Jul": 318,
+          "Aug": 290,
+          "Sep": 262,
+          "Oct": 294
+        }
+      },
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: category-level spending\n\nJun: Groceries $491, Travel $416, Dining $516, Gas $290, Entertainment $274, Shopping $355\nJul: Groceries $428, Travel $430, Dining $447, Gas $247, Entertainment $223, Shopping $318\nAug: Groceries $340, Travel $425, Dining $403, Gas $244, Entertainment $187, Shopping $290\nSep: Groceries $327, Travel $428, Dining $358, Gas $258, Entertainment $166, Shopping $262\nOct: Groceries $294, Travel $452, Dining $315, Gas $269, Entertainment $161, Shopping $294\n\nPlease summarize how each item changed month over month, including dollar and percentage changes."
+    },
+    {
+      "idx": 9,
+      "kind": "merchant",
+      "months": [
+        "Jul",
+        "Aug",
+        "Sep"
+      ],
+      "items": [
+        "Amazon",
+        "Uber",
+        "WholeFoods",
+        "Netflix",
+        "Starbucks",
+        "Target",
+        "Delta",
+        "Shell",
+        "Apple",
+        "Airbnb"
+      ],
+      "values": {
+        "Amazon": {
+          "Jul": 284,
+          "Aug": 330,
+          "Sep": 367
+        },
+        "Uber": {
+          "Jul": 194,
+          "Aug": 165,
+          "Sep": 157
+        },
+        "WholeFoods": {
+          "Jul": 301,
+          "Aug": 296,
+          "Sep": 282
+        },
+        "Netflix": {
+          "Jul": 21,
+          "Aug": 23,
+          "Sep": 25
+        },
+        "Starbucks": {
+          "Jul": 104,
+          "Aug": 155,
+          "Sep": 197
+        },
+        "Target": {
+          "Jul": 149,
+          "Aug": 158,
+          "Sep": 141
+        },
+        "Delta": {
+          "Jul": 25,
+          "Aug": 20,
+          "Sep": 253
+        },
+        "Shell": {
+          "Jul": 37,
+          "Aug": 39,
+          "Sep": 44
+        },
+        "Apple": {
+          "Jul": 82,
+          "Aug": 82,
+          "Sep": 56
+        },
+        "Airbnb": {
+          "Jul": 11,
+          "Aug": 38,
+          "Sep": 59
+        }
+      },
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: merchant-level spending\n\nJul: Amazon $284, Uber $194, WholeFoods $301, Netflix $21, Starbucks $104, Target $149, Delta $25, Shell $37, Apple $82, Airbnb $11\nAug: Amazon $330, Uber $165, WholeFoods $296, Netflix $23, Starbucks $155, Target $158, Delta $20, Shell $39, Apple $82, Airbnb $38\nSep: Amazon $367, Uber $157, WholeFoods $282, Netflix $25, Starbucks $197, Target $141, Delta $253, Shell $44, Apple $56, Airbnb $59\n\nPlease summarize how each item changed month over month, including dollar and percentage changes."
+    }
+  ],
+  "summary": {
+    "num_prompts": 10,
+    "avg_latency_s": 352.6644155115006,
+    "median_latency_s": 1.4065267110127024,
+    "p95_latency_s": 1156.383170968003,
+    "min_latency_s": 1.1712674699956551,
+    "max_latency_s": 1156.3848425020115,
+    "avg_completion_tokens": 256,
+    "sum_completion_tokens": 2560,
+    "mean_req_completion_toks_per_s": 117.17247152782195,
+    "aggregate_completion_toks_per_s": 0.7259025542134736
+  },
+  "results": [
+    {
+      "idx": 0,
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: merchant-level spending\n\nJan: Amazon $215, Uber $121, WholeFoods $270, Netflix $19, Starbucks $127, Target $197, Delta $192, Shell $293, Apple $146, Airbnb $187\nFeb: Amazon $252, Uber $169, WholeFoods $226, Netflix $23, Starbucks $132, Target $174, Delta $101, Shell $300, Apple $34, Airbnb $131\nMar: Amazon $293, Uber $137, WholeFoods $193, Netflix $28, Starbucks $154, Target $165, Delta $218, Shell $298, Apple $0, Airbnb $88\nApr: Amazon $373, Uber $188, WholeFoods $153, Netflix $32, Starbucks $125, Target $152, Delta $248, Shell $305, Apple $6, Airbnb $5\nMay: Amazon $430, Uber $187, WholeFoods $128, Netflix $34, Starbucks $126, Target $133, Delta $58, Shell $307, Apple $0, Airbnb $75\n\nPlease summarize how each item changed month over month, including dollar and percentage changes.",
+      "model_label": "mxfp4",
+      "latency_s": 1156.381127981993,
+      "prompt_tokens": 490,
+      "completion_tokens": 256,
+      "total_tokens": 746,
+      "output_text": null
+    },
+    {
+      "idx": 1,
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: merchant-level spending\n\nJan: Amazon $44, Uber $145, WholeFoods $57, Netflix $15, Starbucks $232, Target $71, Delta $0, Shell $128, Apple $5, Airbnb $52\nFeb: Amazon $57, Uber $152, WholeFoods $79, Netflix $14, Starbucks $245, Target $76, Delta $0, Shell $104, Apple $0, Airbnb $55\nMar: Amazon $28, Uber $175, WholeFoods $91, Netflix $14, Starbucks $244, Target $78, Delta $3, Shell $104, Apple $0, Airbnb $60\nApr: Amazon $0, Uber $206, WholeFoods $84, Netflix $13, Starbucks $231, Target $94, Delta $234, Shell $120, Apple $0, Airbnb $246\n\nPlease summarize how each item changed month over month, including dollar and percentage changes.",
+      "model_label": "mxfp4",
+      "latency_s": 1156.3848425020115,
+      "prompt_tokens": 447,
+      "completion_tokens": 256,
+      "total_tokens": 703,
+      "output_text": null
+    },
+    {
+      "idx": 2,
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: merchant-level spending\n\nSep: Amazon $316, Uber $191, WholeFoods $150, Netflix $13, Starbucks $224, Target $104, Delta $35, Shell $232, Apple $107, Airbnb $160\nOct: Amazon $328, Uber $187, WholeFoods $174, Netflix $12, Starbucks $271, Target $98, Delta $22, Shell $224, Apple $191, Airbnb $202\nNov: Amazon $329, Uber $182, WholeFoods $200, Netflix $11, Starbucks $355, Target $135, Delta $25, Shell $201, Apple $212, Airbnb $222\nDec: Amazon $337, Uber $164, WholeFoods $240, Netflix $10, Starbucks $433, Target $177, Delta $1, Shell $186, Apple $271, Airbnb $235\n\nPlease summarize how each item changed month over month, including dollar and percentage changes.",
+      "model_label": "mxfp4",
+      "latency_s": 1156.3794629969925,
+      "prompt_tokens": 447,
+      "completion_tokens": 256,
+      "total_tokens": 703,
+      "output_text": null
+    },
+    {
+      "idx": 3,
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: category-level spending\n\nApr: Groceries $490, Travel $386, Dining $474, Gas $501, Entertainment $578, Shopping $158\nMay: Groceries $541, Travel $336, Dining $486, Gas $613, Entertainment $629, Shopping $205\nJun: Groceries $579, Travel $306, Dining $506, Gas $760, Entertainment $588, Shopping $285\n\nPlease summarize how each item changed month over month, including dollar and percentage changes.",
+      "model_label": "mxfp4",
+      "latency_s": 49.536490615981165,
+      "prompt_tokens": 356,
+      "completion_tokens": 256,
+      "total_tokens": 612,
+      "output_text": null
+    },
+    {
+      "idx": 4,
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: merchant-level spending\n\nJan: Amazon $201, Uber $52, WholeFoods $150, Netflix $16, Starbucks $163, Target $293, Delta $202, Shell $304, Apple $90, Airbnb $68\nFeb: Amazon $222, Uber $71, WholeFoods $133, Netflix $14, Starbucks $101, Target $303, Delta $482, Shell $290, Apple $6, Airbnb $112\nMar: Amazon $145, Uber $56, WholeFoods $108, Netflix $13, Starbucks $110, Target $344, Delta $554, Shell $255, Apple $42, Airbnb $2\nApr: Amazon $122, Uber $38, WholeFoods $79, Netflix $11, Starbucks $73, Target $355, Delta $600, Shell $227, Apple $0, Airbnb $4\n\nPlease summarize how each item changed month over month, including dollar and percentage changes.",
+      "model_label": "mxfp4",
+      "latency_s": 1.3996264800080098,
+      "prompt_tokens": 447,
+      "completion_tokens": 256,
+      "total_tokens": 703,
+      "output_text": null
+    },
+    {
+      "idx": 5,
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: category-level spending\n\nJan: Groceries $217, Travel $353, Dining $269, Gas $510, Entertainment $276, Shopping $173\nFeb: Groceries $136, Travel $428, Dining $338, Gas $449, Entertainment $297, Shopping $196\nMar: Groceries $156, Travel $509, Dining $394, Gas $398, Entertainment $321, Shopping $201\nApr: Groceries $90, Travel $603, Dining $465, Gas $370, Entertainment $337, Shopping $222\n\nPlease summarize how each item changed month over month, including dollar and percentage changes.",
+      "model_label": "mxfp4",
+      "latency_s": 1.4073824960214552,
+      "prompt_tokens": 383,
+      "completion_tokens": 256,
+      "total_tokens": 639,
+      "output_text": null
+    },
+    {
+      "idx": 6,
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: category-level spending\n\nOct: Groceries $212, Travel $219, Dining $326, Gas $486, Entertainment $169, Shopping $404\nNov: Groceries $191, Travel $246, Dining $310, Gas $508, Entertainment $216, Shopping $469\nDec: Groceries $184, Travel $264, Dining $295, Gas $554, Entertainment $258, Shopping $533\n\nPlease summarize how each item changed month over month, including dollar and percentage changes.",
+      "model_label": "mxfp4",
+      "latency_s": 1.4050927530042827,
+      "prompt_tokens": 356,
+      "completion_tokens": 256,
+      "total_tokens": 612,
+      "output_text": null
+    },
+    {
+      "idx": 7,
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: category-level spending\n\nJan: Groceries $249, Travel $215, Dining $285, Gas $374, Entertainment $187, Shopping $341\nFeb: Groceries $246, Travel $215, Dining $339, Gas $298, Entertainment $190, Shopping $346\nMar: Groceries $246, Travel $211, Dining $374, Gas $246, Entertainment $191, Shopping $333\nApr: Groceries $244, Travel $246, Dining $435, Gas $191, Entertainment $183, Shopping $348\nMay: Groceries $174, Travel $282, Dining $491, Gas $155, Entertainment $201, Shopping $344\n\nPlease summarize how each item changed month over month, including dollar and percentage changes.",
+      "model_label": "mxfp4",
+      "latency_s": 1.4056709260039497,
+      "prompt_tokens": 410,
+      "completion_tokens": 256,
+      "total_tokens": 666,
+      "output_text": null
+    },
+    {
+      "idx": 8,
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: category-level spending\n\nJun: Groceries $491, Travel $416, Dining $516, Gas $290, Entertainment $274, Shopping $355\nJul: Groceries $428, Travel $430, Dining $447, Gas $247, Entertainment $223, Shopping $318\nAug: Groceries $340, Travel $425, Dining $403, Gas $244, Entertainment $187, Shopping $290\nSep: Groceries $327, Travel $428, Dining $358, Gas $258, Entertainment $166, Shopping $262\nOct: Groceries $294, Travel $452, Dining $315, Gas $269, Entertainment $161, Shopping $294\n\nPlease summarize how each item changed month over month, including dollar and percentage changes.",
+      "model_label": "mxfp4",
+      "latency_s": 1.1712674699956551,
+      "prompt_tokens": 410,
+      "completion_tokens": 256,
+      "total_tokens": 666,
+      "output_text": null
+    },
+    {
+      "idx": 9,
+      "system_prompt": "You are a financial assistant. Summarize month-over-month spending trends clearly and numerically.\n\nExample 1\nInput data:\nJan: Groceries $400, Travel $200\nFeb: Groceries $500, Travel $150\nDesired summary:\n- Groceries increased from Jan to Feb by $100 (+25.0%).\n- Travel decreased from Jan to Feb by $50 (-25.0%).\n\nExample 2\nInput data:\nMar: Amazon $120, Uber $80\nApr: Amazon $90, Uber $100\nDesired summary:\n- Amazon decreased from Mar to Apr by $30 (-25.0%).\n- Uber increased from Mar to Apr by $20 (+25.0%).\n\nNow analyze the following customer spending data and summarize the month-over-month trend for each item.\n\nInstruction:\nSummarize how each item changed month over month, including dollar and percentage changes.",
+      "user_prompt": "Data type: merchant-level spending\n\nJul: Amazon $284, Uber $194, WholeFoods $301, Netflix $21, Starbucks $104, Target $149, Delta $25, Shell $37, Apple $82, Airbnb $11\nAug: Amazon $330, Uber $165, WholeFoods $296, Netflix $23, Starbucks $155, Target $158, Delta $20, Shell $39, Apple $82, Airbnb $38\nSep: Amazon $367, Uber $157, WholeFoods $282, Netflix $25, Starbucks $197, Target $141, Delta $253, Shell $44, Apple $56, Airbnb $59\n\nPlease summarize how each item changed month over month, including dollar and percentage changes.",
+      "model_label": "mxfp4",
+      "latency_s": 1.173190892994171,
+      "prompt_tokens": 404,
+      "completion_tokens": 256,
+      "total_tokens": 660,
+      "output_text": null
+    }
+  ]
+}
