@@ -1,103 +1,148 @@
-# Simple vLLM-Style Engine v3
+# v3: Gathered SDPA Attention
 
-This directory contains a teaching implementation of a small vLLM-like
-inference engine for a decoder-only Llama-style model.
+`v3` shows the common intermediate step: keep the paged KV cache for storage, but temporarily leave the paged layout before attention.
 
-The goal is not to reproduce vLLM exactly. The goal is to make these ideas
-concrete and readable:
+## What Changed From v2
 
-- paged KV cache
-- continuous batching
-- chunked prefill
-- prefill/decode disaggregation
-- prefix caching on full KV blocks
-- the boundary between scheduler logic and CUDA kernel execution
-- packed batched execution over multiple requests inside each layer
-- loading a real local Hugging Face Llama checkpoint into the teaching engine
+- `attention_backends.py` introduces one backend: `GatheredSDPAAttention`.
+- The backend gathers cached K/V pages into dense padded tensors.
+- It appends the current K/V chunk into `[cached_prefix | current_chunk]`.
+- It calls PyTorch `torch.nn.functional.scaled_dot_product_attention` through `batched_sdpa_attention()`.
+- The model loop writes current K/V to the paged cache after attention because this backend returns `wrote_kv=False`.
 
-## Layout
+## Attention Flow
 
-- `config.py`: model and engine config dataclasses
-- `tokenizer.py`: tiny demo tokenizer plus a thin Hugging Face tokenizer wrapper
-- `requests.py`: request state machine used by the engine
-- `kernels.py`: attention helpers and CUDA-kernel-facing utilities
-- `kv_cache.py`: paged KV cache allocator and prefix cache
-- `model.py`: a compact Llama-style decoder with explicit KV-cache hooks and one batched attention call per layer
-- `scheduler.py`: decode-first continuous batching scheduler
-- `engine.py`: serial baseline and simplified vLLM-style engine
-- `hf_loader.py`: Hugging Face config/tokenizer/checkpoint loader
-- `bench.py`: toy benchmark entrypoint
-- `run_real.py`: real-model workload harness comparing serial execution and the `v3` engine
-- `compare_vs_transformers.py`: compare `v3` greedy generation against a standard Hugging Face model
-
-## What this engine uses from CUDA
-
-Even though the engine logic is written in Python, the expensive numerical work
-still lands in optimized kernels:
-
-- embeddings and linear layers dispatch GEMM kernels through PyTorch
-- attention uses `torch.nn.functional.scaled_dot_product_attention`, which on
-  CUDA can dispatch FlashAttention-style kernels when supported
-- KV page gather/write is expressed with indexing and tensor writes, which is
-  where serving-specific logic enters the stack
-
-In `v3`, the scheduler still builds prefill and decode batches separately, but
-the model no longer loops over requests for the attention kernel call. Each
-layer gathers paged KV for the whole batch, builds `query_lens`,
-`seq_lens_k`, `cu_seqlens_q`, and a batched block table, and then issues one
-batched SDPA call. `v3` extends that path to a real local checkpoint by
-loading Hugging Face configs, tokenizers, and sharded safetensors weights.
-
-The key teaching point is that serving systems are not "just kernels". They are
-also schedulers, memory managers, and cache managers that decide how kernels are
-fed.
-
-## Running
-
-```bash
-python "/home/ankur/dev/deep-learning-course/Module 8/class_8.1/v3/simple_vllm_engine/bench.py" --device cuda
+```text
+paged cache + block ids
+        |
+        v
+gather cached K/V into dense [B, max_past, Hkv, D]
+        |
+        v
+assemble [cached prefix | current chunk]
+        |
+        v
+build causal/padding mask and call PyTorch SDPA
 ```
 
-CPU also works for smoke testing:
+Example:
 
-```bash
-python "/home/ankur/dev/deep-learning-course/Module 8/class_8.1/v3/simple_vllm_engine/bench.py" --device cpu
+```text
+request A: past_len=5, query_len=2 -> key_len=7
+request B: past_len=9, query_len=1 -> key_len=10
 ```
 
-`bench.py` still uses the small synthetic teaching model and workload. It is
-useful for understanding the scheduler and batching behavior, but it is not the
-entrypoint for validating a real checkpoint load.
+The dense K/V batch has width 10. A uses columns 0..6 and pads 7..9; B uses 0..9.
 
-To run a representative real-model workload with shared prefixes and staggered
-arrivals, comparing serial execution against the `v3` engine, use the existing
-vLLM virtualenv so the Hugging Face dependencies are available:
+## New Data Structures
 
-```bash
-/home/ankur/dev/.venv-llm/bin/python \
-  "/home/ankur/dev/deep-learning-course/Module 8/class_8.1/v3/simple_vllm_engine/run_real.py" \
-  --model-path /home/ankur/dev/models/Llama-3.1-8B-Instruct \
-  --device cuda \
-  --timing
+### `k_past` and `v_past`
+
+`v3` still stores KV in paged form, but before attention it gathers each
+request's cached prefix into dense padded tensors:
+
+```text
+k_past shape = [B, max_past_len, Hkv, D]
+v_past shape = [B, max_past_len, Hkv, D]
 ```
 
-To compare the `v3` engine against a standard Hugging Face greedy generation
-run:
+Example:
 
-```bash
-/home/ankur/dev/.venv-llm/bin/python \
-  "/home/ankur/dev/deep-learning-course/Module 8/class_8.1/v3/simple_vllm_engine/compare_vs_transformers.py" \
-  --model-path /home/ankur/dev/models/Llama-3.1-8B-Instruct \
-  --device cuda
+```text
+request A past_len = 5
+request B past_len = 9
+
+max_past_len = 9
 ```
 
-## Important simplifications
+Rows look like:
 
-- attention over paged KV is implemented by gathering logical pages into a
-  temporary contiguous view before calling SDPA
-- even in `v3`, attention over paged KV is still gathered into a dense view
-  before calling SDPA rather than dispatched to a custom paged-attention kernel
-- prefill and decode workers are separate software stages that share one model
-  instance and one paged KV store; this teaches the disaggregated control flow
-  without requiring a distributed runtime
+```text
+k_past[A, 0:5] = real cached keys
+k_past[A, 5:9] = padding
+k_past[B, 0:9] = real cached keys
+```
 
-That said, the implementation is still faithful to the core serving ideas.
+Edge case:
+
+```text
+past_len = 0
+```
+
+There is no cached prefix for that request, so the gathered row is all padding
+and only the current chunk contributes keys.
+
+### `k_full` and `v_full`
+
+After gathering the cached prefix, the backend appends the current K/V chunk:
+
+```text
+k_full = [cached prefix | current chunk | padding]
+```
+
+Example:
+
+```text
+request A: past_len=5, query_len=2 -> key_len=7
+request B: past_len=9, query_len=1 -> key_len=10
+
+k_full shape = [2, 10, Hkv, D]
+```
+
+Rows look like:
+
+```text
+k_full[A, 0:5]  = cached prefix
+k_full[A, 5:7]  = current chunk
+k_full[A, 7:10] = padding
+
+k_full[B, 0:9]  = cached prefix
+k_full[B, 9:10] = current chunk
+```
+
+This is easy to understand, but expensive: every attention call temporarily
+materializes dense K/V even though the permanent cache is paged.
+
+### Causal and Padding Mask
+
+The SDPA mask combines two ideas:
+
+```text
+padding mask: ignore columns beyond key_len
+causal mask:  query token i cannot see future current-chunk tokens
+```
+
+Example:
+
+```text
+past_len = 5
+query_len = 3
+key_len = 8
+```
+
+The three query rows see:
+
+```text
+query 0 sees keys 0..5
+query 1 sees keys 0..6
+query 2 sees keys 0..7
+```
+
+Edge case:
+
+If another request in the batch has a larger `key_len`, this request's row has
+extra padded columns. Those columns receive the same large negative mask value
+as causally invisible future keys, because both mean "attention must not read
+this key."
+
+## Next Version
+
+`v4` stops materializing dense K/V for attention and switches to a FlashAttention paged backend that consumes the block table directly.
+
+## Validation
+
+Smoke test: `v3` satisfies generation invariants on the synthetic workload with the single `gathered_sdpa` backend.
+
+```bash
+python "Module 8/class_8.1/simple_vllm_engine/scripts/smoke_test_versions.py" --versions v3
+```

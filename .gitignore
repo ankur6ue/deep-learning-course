@@ -2,3 +2,26 @@
 **/runs
 **/frames/*.png
 
+
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+/data/
+/runs/
+/models/
+
+**/data/
+**/runs/
+**/models/
+outputs/
+*.log
+.DS_Store
+.idea/
+
+# Generated profiling and benchmark artifacts.
+*.nsys-rep
+*.sqlite
+Module 8/class_8.1/simple_vllm_engine/benchmark_results*/
+Module 8/class_8.1/simple_vllm_engine/legacy_experiments/
+Module 8/class_8.1/simple_vllm_engine/Module 8/

@@ -7,6 +7,8 @@ import torch
 import torch.nn.functional as F
 
 
+
+
 def repeat_kv(kv: torch.Tensor, num_attention_heads: int) -> torch.Tensor:
     """Expand KV heads to match the number of query heads.
 
@@ -209,16 +211,20 @@ def batched_sdpa_attention(
     query_lens: torch.Tensor,
     key_lens: torch.Tensor,
     past_lens: torch.Tensor,
+    enable_gqa: bool = False,
 ) -> torch.Tensor:
     """Run one attention call for a padded batch of requests.
 
     Args:
         q: Query tensor `[B, Tq_max, Hq, D]`.
-        k: Key tensor `[B, Tk_max, Hq, D]`.
-        v: Value tensor `[B, Tk_max, Hq, D]`.
+        k: Key tensor `[B, Tk_max, H, D]`, where `H` can be either `Hq` or
+            `Hkv` when `enable_gqa=True`.
+        v: Value tensor `[B, Tk_max, H, D]`.
         query_lens: Valid query tokens per request in this step.
         key_lens: Valid visible KV tokens per request.
         past_lens: Cached prefix length per request before the current chunk.
+        enable_gqa: If true, let SDPA handle grouped-query attention directly
+            instead of explicitly repeating KV heads.
     """
     # SDPA expects `[B, H, T, D]`; the rest of the engine keeps `[B, T, H, D]`
     # because that is easier to reason about alongside token positions.
@@ -233,7 +239,14 @@ def batched_sdpa_attention(
         max_key_len=k.shape[1],
         device=q.device,
     ).to(dtype=q.dtype)
-    out = F.scaled_dot_product_attention(q_b, k_b, v_b, attn_mask=mask, dropout_p=0.0)
+    out = F.scaled_dot_product_attention(
+        q_b,
+        k_b,
+        v_b,
+        attn_mask=mask,
+        dropout_p=0.0,
+        enable_gqa=enable_gqa,
+    )
     out = out.permute(0, 2, 1, 3)
     # Zero out padded query rows explicitly. In this implementation, padded
     # query rows are treated as "don't care" rows in the mask rather than fully
@@ -243,6 +256,7 @@ def batched_sdpa_attention(
         torch.arange(q.shape[1], device=q.device).unsqueeze(0) < query_lens.unsqueeze(1)
     ).to(dtype=out.dtype)
     return out * valid.unsqueeze(-1).unsqueeze(-1)
+
 
 
 def swiglu(x_gate: torch.Tensor, x_up: torch.Tensor) -> torch.Tensor:
@@ -255,8 +269,7 @@ def describe_kernel_stack(device: str) -> str:
     if device.startswith("cuda"):
         return (
             "Linear layers dispatch GEMM kernels via PyTorch/cuBLAS, while "
-            "scaled_dot_product_attention dispatches CUDA attention kernels "
-            "when supported. v2 batches requests into one attention call per "
-            "layer, while page gather/write remains explicit serving logic."
+            "v3 attention gathers paged K/V into dense tensors and calls "
+            "PyTorch scaled_dot_product_attention for the actual attention math."
         )
     return "CPU fallback: same software flow, without CUDA kernel dispatch."

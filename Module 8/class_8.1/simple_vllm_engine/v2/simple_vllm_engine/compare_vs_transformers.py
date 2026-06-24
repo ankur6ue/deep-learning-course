@@ -5,15 +5,35 @@ import argparse
 import sys
 from pathlib import Path
 
+
+def _drop_package_dir_from_sys_path() -> None:
+    # When this file is launched directly, Python puts this package directory on
+    # sys.path. That makes local `requests.py` shadow the third-party `requests`
+    # package used by Transformers/Hugging Face. We import through the version
+    # root instead, so the package dir itself should not be a top-level path.
+    package_dir = Path(__file__).resolve().parent
+
+    def is_package_dir(entry: str) -> bool:
+        path = Path.cwd() if entry == "" else Path(entry)
+        return path.resolve() == package_dir
+
+    sys.path[:] = [entry for entry in sys.path if not is_package_dir(entry)]
+
+
+_drop_package_dir_from_sys_path()
+
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_VERSION_ROOT = Path(__file__).resolve().parent.parent
+_TEACHING_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_VERSION_ROOT))
+sys.path.insert(1, str(_TEACHING_ROOT))
 
 from simple_vllm_engine.config import EngineConfig
 from simple_vllm_engine.engine import sample_greedy
-from simple_vllm_engine.hf_loader import build_engine_from_pretrained
+from common.hf_loader import build_engine_from_pretrained
 from simple_vllm_engine.requests import RequestSpec, RequestState
-from simple_vllm_engine.tokenizer import HFTokenizer
+from common.tokenizer import HFTokenizer
 
 
 def parse_args() -> argparse.Namespace:
@@ -199,7 +219,7 @@ def main() -> None:
         dtype=dtype,
     )
 
-    print("Running v4 engine...")
+    print("Running v3 engine...")
     engine_ids, engine_tokenizer, engine_steps = generate_with_engine_stepwise(
         model_path=args.model_path,
         prompt_ids=prompt_ids,

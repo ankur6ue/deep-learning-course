@@ -402,3 +402,24 @@ class PagedKVCache:
                 k_tokens=k_tokens[req_idx, :valid_len],
                 v_tokens=v_tokens[req_idx, :valid_len],
             )
+
+    def write_decode_slots(
+        self,
+        layer_idx: int,
+        slot_mapping: torch.Tensor,
+        k_tokens: torch.Tensor,
+        v_tokens: torch.Tensor,
+    ) -> None:
+        """Write one decode token per batch row using flattened KV slots.
+
+        Args:
+            layer_idx: Transformer layer being updated.
+            slot_mapping: Flattened physical slots shaped `[B]`, where each slot
+                is `physical_block_id * block_size + block_offset`.
+            k_tokens: Decode keys shaped `[B, 1, Hkv, D]`.
+            v_tokens: Decode values shaped `[B, 1, Hkv, D]`.
+        """
+        flat_k = self.k_layers[layer_idx].view(-1, self.model_config.num_key_value_heads, self.model_config.head_dim)
+        flat_v = self.v_layers[layer_idx].view(-1, self.model_config.num_key_value_heads, self.model_config.head_dim)
+        flat_k.index_copy_(0, slot_mapping, k_tokens[:, 0])
+        flat_v.index_copy_(0, slot_mapping, v_tokens[:, 0])

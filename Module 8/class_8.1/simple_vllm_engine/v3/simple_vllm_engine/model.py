@@ -9,9 +9,7 @@ import torch.nn as nn
 from .config import ModelConfig
 from .kernels import (
     apply_rope,
-    batched_sdpa_attention,
     build_cu_seqlens,
-    repeat_kv,
     swiglu,
 )
 from .kv_cache import PagedKVCache
@@ -80,6 +78,7 @@ class MiniLlamaLM(nn.Module):
         self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.profiler = None
+        self.attention_backend = None
 
     def _project_qkv(
         self,
@@ -156,45 +155,6 @@ class MiniLlamaLM(nn.Module):
             block_tables=block_tables,
         )
 
-    def _assemble_full_kv(
-        self,
-        k_past: torch.Tensor,
-        v_past: torch.Tensor,
-        k_new: torch.Tensor,
-        v_new: torch.Tensor,
-        metadata: AttentionBatchMetadata,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Concatenate cached prefix KV with current-chunk KV for the batch.
-
-        Args:
-            k_past: Gathered cached keys shaped `[B, Tpast_pad, Hkv, D]`.
-            v_past: Gathered cached values shaped `[B, Tpast_pad, Hkv, D]`.
-            k_new: Current chunk keys shaped `[B, Tq_pad, Hkv, D]`.
-            v_new: Current chunk values shaped `[B, Tq_pad, Hkv, D]`.
-            metadata: Per-request valid lengths describing how much of each row
-                is real. This matters because both the past view and current
-                chunk are padded.
-        """
-        batch_size = k_new.shape[0]
-        max_key_len = int(metadata.key_lens.max().item()) if batch_size > 0 else 0
-        # Build one padded K/V tensor for the entire request batch. Each row is
-        # `[cached prefix | current chunk | pad]` for a single request.
-        k_full = k_new.new_zeros((batch_size, max_key_len, k_new.shape[2], k_new.shape[3]))
-        v_full = v_new.new_zeros((batch_size, max_key_len, v_new.shape[2], v_new.shape[3]))
-        for req_idx in range(batch_size):
-            past_len = int(metadata.past_lens[req_idx].item())
-            query_len = int(metadata.query_lens[req_idx].item())
-            if past_len > 0:
-                k_full[req_idx, :past_len].copy_(k_past[req_idx, :past_len])
-                v_full[req_idx, :past_len].copy_(v_past[req_idx, :past_len])
-            if query_len > 0:
-                k_full[req_idx, past_len : past_len + query_len].copy_(k_new[req_idx, :query_len])
-                v_full[req_idx, past_len : past_len + query_len].copy_(v_new[req_idx, :query_len])
-        return (
-            repeat_kv(k_full, self.config.num_attention_heads),
-            repeat_kv(v_full, self.config.num_attention_heads),
-        )
-
     def _forward_request_batch(
         self,
         requests: list[RequestState],
@@ -241,41 +201,30 @@ class MiniLlamaLM(nn.Module):
             # `positions` holds absolute token indices, so RoPE still sees the
             # right offsets when we are processing a later prefill chunk.
                 q, k_new, v_new = self._project_qkv(layer, normed, positions)
-            # Gather all previously cached pages for the whole batch into one
-            # padded `[B, Tpast, Hkv, D]` view.
-            with self.profiler.section("model.kv_gather") if self.profiler else nullcontext():
-                past_batch = kv_cache.gather_batch(layer_idx, block_id_lists, past_lens)
-            with self.profiler.section("model.kv_assemble") if self.profiler else nullcontext():
-                k_full, v_full = self._assemble_full_kv(
-                    k_past=past_batch.k,
-                    v_past=past_batch.v,
-                    k_new=k_new,
-                    v_new=v_new,
-                    metadata=metadata,
-                )
-            # One attention call covers every request in the batch. The per-
-            # request differences in chunk length and prefix length are carried
-            # by `query_lens`, `key_lens`, and `past_lens`.
-            with self.profiler.section("model.attention") if self.profiler else nullcontext():
-                attn_out_heads = batched_sdpa_attention(
-                    q=q,
-                    k=k_full,
-                    v=v_full,
-                    query_lens=metadata.query_lens,
-                    key_lens=metadata.key_lens,
-                    past_lens=metadata.past_lens,
-                )
+            attn_out_heads, wrote_kv = self.attention_backend.forward(
+                layer_idx=layer_idx,
+                q=q,
+                k_new=k_new,
+                v_new=v_new,
+                kv_cache=kv_cache,
+                block_id_lists=block_id_lists,
+                block_tables=metadata.block_tables,
+                query_lens=metadata.query_lens,
+                past_lens=metadata.past_lens,
+                key_lens=metadata.key_lens,
+            )
             # After attention consumes the current chunk, append that chunk's
             # K/V into the paged cache so later decode steps can see it.
-            with self.profiler.section("model.kv_write") if self.profiler else nullcontext():
-                kv_cache.write_batch(
-                    layer_idx=layer_idx,
-                    block_id_lists=block_id_lists,
-                    start_tokens=past_lens,
-                    valid_lengths=query_lens,
-                    k_tokens=k_new,
-                    v_tokens=v_new,
-                )
+            if not wrote_kv:
+                with self.profiler.section("model.kv_write") if self.profiler else nullcontext():
+                    kv_cache.write_batch(
+                        layer_idx=layer_idx,
+                        block_id_lists=block_id_lists,
+                        start_tokens=past_lens,
+                        valid_lengths=query_lens,
+                        k_tokens=k_new,
+                        v_tokens=v_new,
+                    )
 
             with self.profiler.section("model.attn_out_proj") if self.profiler else nullcontext():
                 attn_out = layer["o_proj"](

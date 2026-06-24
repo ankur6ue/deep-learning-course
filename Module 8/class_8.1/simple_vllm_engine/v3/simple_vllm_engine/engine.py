@@ -5,11 +5,12 @@ from dataclasses import dataclass
 
 import torch
 
+from .attention_backends import build_attention_backend
 from .config import EngineConfig, ModelConfig
 from .kernels import describe_kernel_stack
 from .kv_cache import PagedKVCache
 from .model import MiniLlamaLM
-from .profiling import SimpleProfiler
+from common.profiling import SimpleProfiler
 from .requests import RequestSpec, RequestState
 from .scheduler import ContinuousBatchScheduler, PrefillWorkItem
 
@@ -209,6 +210,11 @@ class SimpleVLLMEngine:
         self.model.eval()
         self.profiler = SimpleProfiler(engine_config.device, enabled=engine_config.enable_timing)
         self.model.profiler = self.profiler
+        self.model.attention_backend = build_attention_backend(
+            engine_config.attention_backend,
+            num_attention_heads=model_config.num_attention_heads,
+            profiler=self.profiler,
+        )
         self.kv_cache = PagedKVCache(model_config, engine_config)
         self.scheduler = ContinuousBatchScheduler(engine_config)
         self.prefill_worker = PrefillWorker(self.model, model_config, engine_config, self.kv_cache, self.profiler)

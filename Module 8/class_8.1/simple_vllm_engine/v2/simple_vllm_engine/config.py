@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 
@@ -15,6 +16,7 @@ class ModelConfig:
     num_key_value_heads: int = 4
     max_position_embeddings: int = 2048
     rope_theta: float = 10000.0
+    rope_scaling: dict[str, Any] | None = None
     rms_norm_eps: float = 1e-5
 
     @property
@@ -35,6 +37,7 @@ class EngineConfig:
     enable_prefix_cache: bool = True
     device: str = "cuda"
     dtype: torch.dtype = torch.bfloat16
+    enable_timing: bool = False
     eos_token_id: int = 2
     pad_token_id: int = 0
 

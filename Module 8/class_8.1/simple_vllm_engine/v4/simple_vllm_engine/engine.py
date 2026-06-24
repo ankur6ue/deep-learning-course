@@ -10,7 +10,7 @@ from .config import EngineConfig, ModelConfig
 from .kernels import describe_kernel_stack
 from .kv_cache import PagedKVCache
 from .model import MiniLlamaLM
-from .profiling import SimpleProfiler
+from common.profiling import SimpleProfiler
 from .requests import RequestSpec, RequestState
 from .scheduler import ContinuousBatchScheduler, PrefillWorkItem
 
@@ -137,6 +137,17 @@ class DecodeWorker:
         self.engine_config = engine_config
         self.kv_cache = kv_cache
         self.profiler = profiler
+        device = next(self.model.parameters()).device
+        self.input_ids_workspace = torch.empty(
+            (engine_config.max_decode_batch_size, 1),
+            device=device,
+            dtype=torch.long,
+        )
+        self.positions_workspace = torch.empty(
+            (engine_config.max_decode_batch_size, 1),
+            device=device,
+            dtype=torch.long,
+        )
 
     def process(self, requests: list[RequestState]) -> None:
         """Run one decode batch.
@@ -148,15 +159,19 @@ class DecodeWorker:
         if not requests:
             return
         with self.profiler.section("decode.prepare"):
-            device = next(self.model.parameters()).device
-            input_ids = torch.tensor(
-                [[req.next_input_token_id] for req in requests],
-                device=device,
+            batch_size = len(requests)
+            if batch_size > self.engine_config.max_decode_batch_size:
+                raise ValueError("decode batch is larger than max_decode_batch_size")
+            input_ids = self.input_ids_workspace[:batch_size]
+            positions = self.positions_workspace[:batch_size]
+            input_ids[:, 0] = torch.tensor(
+                [req.next_input_token_id for req in requests],
+                device=input_ids.device,
                 dtype=torch.long,
             )
-            positions = torch.tensor(
-                [[req.cached_seq_len] for req in requests],
-                device=device,
+            positions[:, 0] = torch.tensor(
+                [req.cached_seq_len for req in requests],
+                device=positions.device,
                 dtype=torch.long,
             )
             for req in requests:
@@ -335,7 +350,7 @@ def timed_run(engine: SimpleVLLMEngine | SerialEngine, specs: list[RequestSpec])
     if engine.engine_config.device.startswith("cuda"):
         torch.cuda.synchronize()
     t0 = time.perf_counter()
-    with torch.no_grad():
+    with torch.inference_mode():
         results = engine.run(specs)
     if engine.engine_config.device.startswith("cuda"):
         torch.cuda.synchronize()

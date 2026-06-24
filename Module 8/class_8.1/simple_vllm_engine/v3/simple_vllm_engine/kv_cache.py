@@ -324,6 +324,48 @@ class PagedKVCache:
             v=v_batch,
         )
 
+    def build_full_kv_batch(
+        self,
+        layer_idx: int,
+        block_id_lists: list[list[int]],
+        past_lens: list[int],
+        query_lens: list[int],
+        k_new: torch.Tensor,
+        v_new: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Materialize `[past | current chunk | pad]` directly in KV-head space.
+
+        This avoids building a separate padded past tensor and then copying it
+        again into a second `[past | current chunk]` tensor.
+        """
+        device = self.k_layers[layer_idx].device
+        dtype = self.k_layers[layer_idx].dtype
+        batch_size = len(block_id_lists)
+        max_key_len = max((past + query for past, query in zip(past_lens, query_lens, strict=True)), default=0)
+        h = self.model_config.num_key_value_heads
+        d = self.model_config.head_dim
+        k_full = torch.zeros((batch_size, max_key_len, h, d), device=device, dtype=dtype)
+        v_full = torch.zeros((batch_size, max_key_len, h, d), device=device, dtype=dtype)
+
+        for req_idx, (block_ids, past_len, query_len) in enumerate(
+            zip(block_id_lists, past_lens, query_lens, strict=True)
+        ):
+            if past_len > 0:
+                blocks_needed = self.blocks_needed(past_len)
+                block_tensor = torch.tensor(block_ids[:blocks_needed], device=device, dtype=torch.long)
+                k_pages = self.k_layers[layer_idx].index_select(0, block_tensor)
+                v_pages = self.v_layers[layer_idx].index_select(0, block_tensor)
+                k_full[req_idx, :past_len].copy_(
+                    k_pages.reshape(blocks_needed * self.block_size, h, d)[:past_len]
+                )
+                v_full[req_idx, :past_len].copy_(
+                    v_pages.reshape(blocks_needed * self.block_size, h, d)[:past_len]
+                )
+            if query_len > 0:
+                k_full[req_idx, past_len : past_len + query_len].copy_(k_new[req_idx, :query_len])
+                v_full[req_idx, past_len : past_len + query_len].copy_(v_new[req_idx, :query_len])
+        return k_full, v_full
+
     def write_batch(
         self,
         layer_idx: int,

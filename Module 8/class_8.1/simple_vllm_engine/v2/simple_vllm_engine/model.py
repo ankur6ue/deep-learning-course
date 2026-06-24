@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 
 import torch
@@ -8,9 +9,7 @@ import torch.nn as nn
 from .config import ModelConfig
 from .kernels import (
     apply_rope,
-    batched_sdpa_attention,
-    build_cu_seqlens,
-    repeat_kv,
+    paged_sdpa_attention,
     swiglu,
 )
 from .kv_cache import PagedKVCache
@@ -49,7 +48,6 @@ class AttentionBatchMetadata:
     query_lens: torch.Tensor
     past_lens: torch.Tensor
     key_lens: torch.Tensor
-    cu_seqlens_q: torch.Tensor
     block_tables: torch.Tensor
 
 
@@ -78,6 +76,7 @@ class MiniLlamaLM(nn.Module):
             )
         self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.profiler = None
 
     def _project_qkv(
         self,
@@ -104,8 +103,8 @@ class MiniLlamaLM(nn.Module):
         v = layer["v_proj"](hidden).view(
             bsz, seqlen, self.config.num_key_value_heads, self.config.head_dim
         )
-        q = apply_rope(q, positions, self.config.rope_theta)
-        k = apply_rope(k, positions, self.config.rope_theta)
+        q = apply_rope(q, positions, self.config.rope_theta, rope_scaling=self.config.rope_scaling)
+        k = apply_rope(k, positions, self.config.rope_theta, rope_scaling=self.config.rope_scaling)
         return q, k, v
 
     def _masked_residual(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -150,47 +149,7 @@ class MiniLlamaLM(nn.Module):
             query_lens=query_lens,
             past_lens=past_lens,
             key_lens=key_lens,
-            cu_seqlens_q=build_cu_seqlens(query_lens),
             block_tables=block_tables,
-        )
-
-    def _assemble_full_kv(
-        self,
-        k_past: torch.Tensor,
-        v_past: torch.Tensor,
-        k_new: torch.Tensor,
-        v_new: torch.Tensor,
-        metadata: AttentionBatchMetadata,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Concatenate cached prefix KV with current-chunk KV for the batch.
-
-        Args:
-            k_past: Gathered cached keys shaped `[B, Tpast_pad, Hkv, D]`.
-            v_past: Gathered cached values shaped `[B, Tpast_pad, Hkv, D]`.
-            k_new: Current chunk keys shaped `[B, Tq_pad, Hkv, D]`.
-            v_new: Current chunk values shaped `[B, Tq_pad, Hkv, D]`.
-            metadata: Per-request valid lengths describing how much of each row
-                is real. This matters because both the past view and current
-                chunk are padded.
-        """
-        batch_size = k_new.shape[0]
-        max_key_len = int(metadata.key_lens.max().item()) if batch_size > 0 else 0
-        # Build one padded K/V tensor for the entire request batch. Each row is
-        # `[cached prefix | current chunk | pad]` for a single request.
-        k_full = k_new.new_zeros((batch_size, max_key_len, k_new.shape[2], k_new.shape[3]))
-        v_full = v_new.new_zeros((batch_size, max_key_len, v_new.shape[2], v_new.shape[3]))
-        for req_idx in range(batch_size):
-            past_len = int(metadata.past_lens[req_idx].item())
-            query_len = int(metadata.query_lens[req_idx].item())
-            if past_len > 0:
-                k_full[req_idx, :past_len].copy_(k_past[req_idx, :past_len])
-                v_full[req_idx, :past_len].copy_(v_past[req_idx, :past_len])
-            if query_len > 0:
-                k_full[req_idx, past_len : past_len + query_len].copy_(k_new[req_idx, :query_len])
-                v_full[req_idx, past_len : past_len + query_len].copy_(v_new[req_idx, :query_len])
-        return (
-            repeat_kv(k_full, self.config.num_attention_heads),
-            repeat_kv(v_full, self.config.num_attention_heads),
         )
 
     def _forward_request_batch(
@@ -215,7 +174,8 @@ class MiniLlamaLM(nn.Module):
                 prefix tokens.
         """
         metadata = self._build_attention_metadata(requests, lengths, kv_cache)
-        hidden = self.embed_tokens(input_ids)
+        with self.profiler.section("model.embed") if self.profiler else nullcontext():
+            hidden = self.embed_tokens(input_ids)
         # This mask is only about padding inside the current batched chunk.
         # Example: if a request already prefetched 5 prompt tokens and is now
         # processing a 4-token chunk, `query_lens` is 4 here. The absolute
@@ -233,60 +193,61 @@ class MiniLlamaLM(nn.Module):
 
         for layer_idx, layer in enumerate(self.layers):
             residual = hidden
-            normed = layer["input_norm"](hidden)
+            with self.profiler.section("model.qkv_proj") if self.profiler else nullcontext():
+                normed = layer["input_norm"](hidden)
             # `positions` holds absolute token indices, so RoPE still sees the
             # right offsets when we are processing a later prefill chunk.
-            q, k_new, v_new = self._project_qkv(layer, normed, positions)
-            # Gather all previously cached pages for the whole batch into one
-            # padded `[B, Tpast, Hkv, D]` view.
-            past_batch = kv_cache.gather_batch(layer_idx, block_id_lists, past_lens)
-            k_full, v_full = self._assemble_full_kv(
-                k_past=past_batch.k,
-                v_past=past_batch.v,
-                k_new=k_new,
-                v_new=v_new,
-                metadata=metadata,
-            )
-            # One attention call covers every request in the batch. The per-
-            # request differences in chunk length and prefix length are carried
-            # by `query_lens`, `key_lens`, and `past_lens`.
-            attn_out_heads = batched_sdpa_attention(
-                q=q,
-                k=k_full,
-                v=v_full,
-                query_lens=metadata.query_lens,
-                key_lens=metadata.key_lens,
-                past_lens=metadata.past_lens,
-            )
-            # After attention consumes the current chunk, append that chunk's
-            # K/V into the paged cache so later decode steps can see it.
-            kv_cache.write_batch(
-                layer_idx=layer_idx,
-                block_id_lists=block_id_lists,
-                start_tokens=past_lens,
-                valid_lengths=query_lens,
-                k_tokens=k_new,
-                v_tokens=v_new,
-            )
+                q, k_new, v_new = self._project_qkv(layer, normed, positions)
+            # v2 is the direct-paged reference path. We first append the new
+            # K/V rows to their physical cache pages, then attention reads every
+            # visible key/value by walking each request's block table.
+            #
+            # Example with block_size=16 and req.block_ids=[7, 12]:
+            # logical token 18 is stored at block_ids[18 // 16] = 12, offset 2.
+            # `paged_sdpa_attention` repeats that lookup for the keys visible
+            # to each query token instead of gathering a dense K/V tensor.
+            with self.profiler.section("model.kv_write") if self.profiler else nullcontext():
+                kv_cache.write_batch(
+                    layer_idx=layer_idx,
+                    block_id_lists=block_id_lists,
+                    start_tokens=past_lens,
+                    valid_lengths=query_lens,
+                    k_tokens=k_new,
+                    v_tokens=v_new,
+                )
+            with self.profiler.section("model.attention.direct_paged") if self.profiler else nullcontext():
+                attn_out_heads = paged_sdpa_attention(
+                    q=q,
+                    k_cache=kv_cache.k_layers[layer_idx],
+                    v_cache=kv_cache.v_layers[layer_idx],
+                    block_tables=metadata.block_tables,
+                    query_lens=metadata.query_lens,
+                    key_lens=metadata.key_lens,
+                    past_lens=metadata.past_lens,
+                    block_size=kv_cache.block_size,
+                )
 
-            attn_out = layer["o_proj"](
-                attn_out_heads.reshape(attn_out_heads.shape[0], attn_out_heads.shape[1], -1)
-            )
-            hidden = residual + self._masked_residual(attn_out, mask)
+            with self.profiler.section("model.attn_out_proj") if self.profiler else nullcontext():
+                attn_out = layer["o_proj"](
+                    attn_out_heads.reshape(attn_out_heads.shape[0], attn_out_heads.shape[1], -1)
+                )
+                hidden = residual + self._masked_residual(attn_out, mask)
             residual = hidden
-            normed = layer["post_norm"](hidden)
-            ff = layer["down_proj"](swiglu(layer["gate_proj"](normed), layer["up_proj"](normed)))
-            hidden = residual + self._masked_residual(ff, mask)
+            with self.profiler.section("model.mlp") if self.profiler else nullcontext():
+                normed = layer["post_norm"](hidden)
+                ff = layer["down_proj"](swiglu(layer["gate_proj"](normed), layer["up_proj"](normed)))
+                hidden = residual + self._masked_residual(ff, mask)
 
-        hidden = self.norm(hidden)
+        with self.profiler.section("model.final_norm_lm_head") if self.profiler else nullcontext():
+            hidden = self.norm(hidden)
         # For each request, take the final valid token from this chunk. During
         # prefill this is the last token of the chunk; during decode it is the
         # single decode token.
-        last_hidden = hidden[
-            torch.arange(hidden.shape[0], device=hidden.device),
-            metadata.query_lens - 1,
-        ]
-        return self.lm_head(last_hidden)
+            last_hidden = hidden[
+                torch.arange(hidden.shape[0], device=hidden.device),
+                metadata.query_lens - 1,
+            ]
+            return self.lm_head(last_hidden)
 
     def prefill_chunk(
         self,

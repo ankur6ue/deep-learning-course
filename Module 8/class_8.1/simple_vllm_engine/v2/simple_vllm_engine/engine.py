@@ -9,6 +9,7 @@ from .config import EngineConfig, ModelConfig
 from .kernels import describe_kernel_stack
 from .kv_cache import PagedKVCache
 from .model import MiniLlamaLM
+from common.profiling import SimpleProfiler
 from .requests import RequestSpec, RequestState
 from .scheduler import ContinuousBatchScheduler, PrefillWorkItem
 
@@ -39,6 +40,7 @@ class PrefillWorker:
         model_config: ModelConfig,
         engine_config: EngineConfig,
         kv_cache: PagedKVCache,
+        profiler: SimpleProfiler,
     ) -> None:
         """Create the worker that processes prompt chunks.
 
@@ -53,6 +55,7 @@ class PrefillWorker:
         self.model_config = model_config
         self.engine_config = engine_config
         self.kv_cache = kv_cache
+        self.profiler = profiler
 
     def process(self, work_items: list[PrefillWorkItem]) -> None:
         """Run one prefill batch.
@@ -66,55 +69,58 @@ class PrefillWorker:
         """
         if not work_items:
             return
-        device = next(self.model.parameters()).device
-        max_chunk = max(item.chunk_len for item in work_items)
-        input_ids = torch.full(
-            (len(work_items), max_chunk),
-            self.engine_config.pad_token_id,
-            device=device,
-            dtype=torch.long,
-        )
-        positions = torch.zeros((len(work_items), max_chunk), device=device, dtype=torch.long)
-        lengths: list[int] = []
+        with self.profiler.section("prefill.prepare"):
+            device = next(self.model.parameters()).device
+            max_chunk = max(item.chunk_len for item in work_items)
+            input_ids = torch.full(
+                (len(work_items), max_chunk),
+                self.engine_config.pad_token_id,
+                device=device,
+                dtype=torch.long,
+            )
+            positions = torch.zeros((len(work_items), max_chunk), device=device, dtype=torch.long)
+            lengths: list[int] = []
 
-        for idx, item in enumerate(work_items):
-            req = item.request
-            start = req.prompt_tokens_computed
-            end = start + item.chunk_len
-            chunk_ids = req.prompt_ids[start:end]
-            req.block_ids = self.kv_cache.ensure_capacity(req.block_ids, req.cached_seq_len + item.chunk_len)
-            input_ids[idx, : item.chunk_len] = torch.tensor(chunk_ids, device=device, dtype=torch.long)
-            positions[idx, : item.chunk_len] = torch.arange(start, end, device=device, dtype=torch.long)
-            lengths.append(item.chunk_len)
+            for idx, item in enumerate(work_items):
+                req = item.request
+                start = req.prompt_tokens_computed
+                end = start + item.chunk_len
+                chunk_ids = req.prompt_ids[start:end]
+                req.block_ids = self.kv_cache.ensure_capacity(req.block_ids, req.cached_seq_len + item.chunk_len)
+                input_ids[idx, : item.chunk_len] = torch.tensor(chunk_ids, device=device, dtype=torch.long)
+                positions[idx, : item.chunk_len] = torch.arange(start, end, device=device, dtype=torch.long)
+                lengths.append(item.chunk_len)
 
-        logits = self.model.prefill_chunk(
-            requests=[item.request for item in work_items],
-            input_ids=input_ids,
-            positions=positions,
-            lengths=lengths,
-            kv_cache=self.kv_cache,
-        )
+        with self.profiler.section("prefill.model"):
+            logits = self.model.prefill_chunk(
+                requests=[item.request for item in work_items],
+                input_ids=input_ids,
+                positions=positions,
+                lengths=lengths,
+                kv_cache=self.kv_cache,
+            )
 
-        for idx, item in enumerate(work_items):
-            req = item.request
-            req.prompt_tokens_computed += item.chunk_len
-            full_prompt_blocks = req.prompt_len // self.engine_config.block_size
-            full_blocks_now = min(req.prompt_tokens_computed // self.engine_config.block_size, full_prompt_blocks)
-            if self.engine_config.enable_prefix_cache:
-                req.prefix_blocks_published, newly_cached_blocks = self.kv_cache.prefix_cache.insert_full_blocks(
-                    prompt_ids=req.prompt_ids,
-                    block_ids=req.block_ids,
-                    published_until_block=req.prefix_blocks_published,
-                    full_blocks_available=full_blocks_now,
-                )
-                if newly_cached_blocks:
-                    self.kv_cache.retain_blocks(newly_cached_blocks)
-            if not req.needs_prefill:
-                next_token = int(sample_greedy(logits[idx : idx + 1])[0].item())
-                req.add_generated_token(next_token)
-                if req.should_stop(self.engine_config.eos_token_id):
-                    continue
-                req.next_input_token_id = next_token
+        with self.profiler.section("prefill.postprocess"):
+            for idx, item in enumerate(work_items):
+                req = item.request
+                req.prompt_tokens_computed += item.chunk_len
+                full_prompt_blocks = req.prompt_len // self.engine_config.block_size
+                full_blocks_now = min(req.prompt_tokens_computed // self.engine_config.block_size, full_prompt_blocks)
+                if self.engine_config.enable_prefix_cache:
+                    req.prefix_blocks_published, newly_cached_blocks = self.kv_cache.prefix_cache.insert_full_blocks(
+                        prompt_ids=req.prompt_ids,
+                        block_ids=req.block_ids,
+                        published_until_block=req.prefix_blocks_published,
+                        full_blocks_available=full_blocks_now,
+                    )
+                    if newly_cached_blocks:
+                        self.kv_cache.retain_blocks(newly_cached_blocks)
+                if not req.needs_prefill:
+                    next_token = int(sample_greedy(logits[idx : idx + 1])[0].item())
+                    req.add_generated_token(next_token)
+                    if req.should_stop(self.engine_config.eos_token_id):
+                        continue
+                    req.next_input_token_id = next_token
 
 
 class DecodeWorker:
@@ -123,11 +129,13 @@ class DecodeWorker:
         model: MiniLlamaLM,
         engine_config: EngineConfig,
         kv_cache: PagedKVCache,
+        profiler: SimpleProfiler,
     ) -> None:
         """Create the worker that processes one-token decode steps."""
         self.model = model
         self.engine_config = engine_config
         self.kv_cache = kv_cache
+        self.profiler = profiler
 
     def process(self, requests: list[RequestState]) -> None:
         """Run one decode batch.
@@ -138,60 +146,73 @@ class DecodeWorker:
         """
         if not requests:
             return
-        device = next(self.model.parameters()).device
-        input_ids = torch.tensor(
-            [[req.next_input_token_id] for req in requests],
-            device=device,
-            dtype=torch.long,
-        )
-        positions = torch.tensor(
-            [[req.cached_seq_len] for req in requests],
-            device=device,
-            dtype=torch.long,
-        )
-        for req in requests:
-            req.block_ids = self.kv_cache.ensure_capacity(req.block_ids, req.cached_seq_len + 1)
+        with self.profiler.section("decode.prepare"):
+            device = next(self.model.parameters()).device
+            input_ids = torch.tensor(
+                [[req.next_input_token_id] for req in requests],
+                device=device,
+                dtype=torch.long,
+            )
+            positions = torch.tensor(
+                [[req.cached_seq_len] for req in requests],
+                device=device,
+                dtype=torch.long,
+            )
+            for req in requests:
+                req.block_ids = self.kv_cache.ensure_capacity(req.block_ids, req.cached_seq_len + 1)
 
-        logits = self.model.decode_tokens(
-            requests=requests,
-            input_ids=input_ids,
-            positions=positions,
-            kv_cache=self.kv_cache,
-        )
+        with self.profiler.section("decode.model"):
+            logits = self.model.decode_tokens(
+                requests=requests,
+                input_ids=input_ids,
+                positions=positions,
+                kv_cache=self.kv_cache,
+            )
 
-        next_tokens = sample_greedy(logits)
-        for idx, req in enumerate(requests):
-            req.generated_tokens_in_cache += 1
-            sampled = int(next_tokens[idx].item())
-            req.add_generated_token(sampled)
-            if req.should_stop(self.engine_config.eos_token_id):
-                continue
-            req.next_input_token_id = sampled
+        with self.profiler.section("decode.postprocess"):
+            next_tokens = sample_greedy(logits)
+            for idx, req in enumerate(requests):
+                req.generated_tokens_in_cache += 1
+                sampled = int(next_tokens[idx].item())
+                req.add_generated_token(sampled)
+                if req.should_stop(self.engine_config.eos_token_id):
+                    continue
+                req.next_input_token_id = sampled
 
 
 class SimpleVLLMEngine:
-    def __init__(self, model_config: ModelConfig, engine_config: EngineConfig) -> None:
+    def __init__(
+        self,
+        model_config: ModelConfig,
+        engine_config: EngineConfig,
+        model: MiniLlamaLM | None = None,
+    ) -> None:
         """Construct the teaching engine and all of its subsystems.
 
         Args:
             model_config: Architecture served by this engine.
             engine_config: Runtime settings including block size, batch limits,
                 device, and dtype.
+            model: Optional preloaded model instance. `v3` uses this to inject a
+                pretrained checkpoint-loaded model instead of a random one.
         """
         engine_config.validate(model_config)
         if engine_config.device.startswith("cuda") and not torch.cuda.is_available():
             raise RuntimeError(
                 "Requested device='cuda', but torch.cuda.is_available() is False. "
                 "No CUDA GPU is visible to this process."
-            )
+        )
         self.model_config = model_config
         self.engine_config = engine_config
-        self.model = MiniLlamaLM(model_config).to(device=engine_config.device, dtype=engine_config.dtype)
+        self.model = model or MiniLlamaLM(model_config)
+        self.model = self.model.to(device=engine_config.device, dtype=engine_config.dtype)
         self.model.eval()
+        self.profiler = SimpleProfiler(engine_config.device, enabled=engine_config.enable_timing)
+        self.model.profiler = self.profiler
         self.kv_cache = PagedKVCache(model_config, engine_config)
         self.scheduler = ContinuousBatchScheduler(engine_config)
-        self.prefill_worker = PrefillWorker(self.model, model_config, engine_config, self.kv_cache)
-        self.decode_worker = DecodeWorker(self.model, engine_config, self.kv_cache)
+        self.prefill_worker = PrefillWorker(self.model, model_config, engine_config, self.kv_cache, self.profiler)
+        self.decode_worker = DecodeWorker(self.model, engine_config, self.kv_cache, self.profiler)
 
     def kernel_summary(self) -> str:
         """Describe which high-level kernel stack this engine uses."""

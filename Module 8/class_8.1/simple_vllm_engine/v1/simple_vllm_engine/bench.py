@@ -8,12 +8,15 @@ from pathlib import Path
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_VERSION_ROOT = Path(__file__).resolve().parent.parent
+_TEACHING_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_VERSION_ROOT))
+sys.path.insert(1, str(_TEACHING_ROOT))
 
 from simple_vllm_engine.config import EngineConfig, ModelConfig
 from simple_vllm_engine.engine import SerialEngine, SimpleVLLMEngine, timed_run
 from simple_vllm_engine.requests import RequestSpec
-from simple_vllm_engine.tokenizer import SimpleTokenizer
+from common.tokenizer import SimpleTokenizer
 
 
 def make_demo_prompts() -> list[str]:

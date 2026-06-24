@@ -35,6 +35,7 @@ class EngineConfig:
     max_prefill_chunk_tokens: int = 64
     max_decode_batch_size: int = 16
     enable_prefix_cache: bool = True
+    attention_backend: str = "gathered_sdpa"
     device: str = "cuda"
     dtype: torch.dtype = torch.bfloat16
     enable_timing: bool = False
@@ -55,3 +56,9 @@ class EngineConfig:
             raise ValueError("block_size must be positive")
         if self.max_batch_tokens <= 0:
             raise ValueError("max_batch_tokens must be positive")
+        valid_attention_backends = {"gathered_sdpa"}
+        if self.attention_backend not in valid_attention_backends:
+            raise ValueError(
+                "attention_backend must be one of: "
+                + ", ".join(sorted(valid_attention_backends))
+            )

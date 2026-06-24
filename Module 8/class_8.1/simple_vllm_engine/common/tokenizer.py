@@ -108,7 +108,10 @@ class HFTokenizer:
         """
         from transformers import AutoTokenizer
 
-        backend = AutoTokenizer.from_pretrained(model_path)
+        try:
+            backend = AutoTokenizer.from_pretrained(model_path, fix_mistral_regex=True)
+        except TypeError:
+            backend = AutoTokenizer.from_pretrained(model_path)
         return cls(backend=backend)
 
     @property
@@ -167,6 +170,14 @@ class HFTokenizer:
             messages: Chat messages such as
                 `[{"role": "user", "content": "Explain attention"}]`.
         """
+        if not getattr(self.backend, "chat_template", None):
+            text_parts = []
+            for message in messages:
+                role = str(message.get("role", "user")).strip() or "user"
+                content = str(message.get("content", ""))
+                text_parts.append(f"{role}: {content}")
+            text_parts.append("assistant:")
+            return self.encode("\n\n".join(text_parts), add_bos=True, add_eos=False)
         if not hasattr(self.backend, "apply_chat_template"):
             raise ValueError("Tokenizer does not provide apply_chat_template")
         encoded = self.backend.apply_chat_template(

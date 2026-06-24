@@ -8,8 +8,10 @@ import torch.nn as nn
 
 from .config import ModelConfig
 from .kernels import (
+    TritonDecodeMetadata,
     apply_rope,
     build_cu_seqlens,
+    build_triton_decode_metadata,
     swiglu,
 )
 from .kv_cache import PagedKVCache
@@ -48,8 +50,14 @@ class AttentionBatchMetadata:
     query_lens: torch.Tensor
     past_lens: torch.Tensor
     key_lens: torch.Tensor
+    key_lens_i32: torch.Tensor
     cu_seqlens_q: torch.Tensor
     block_tables: torch.Tensor
+    block_tables_i32: torch.Tensor
+    total_queries: int
+    max_key_len: int
+    triton_decode_metadata: TritonDecodeMetadata | None = None
+    decode_slot_mapping: torch.Tensor | None = None
 
 
 class MiniLlamaLM(nn.Module):
@@ -65,9 +73,21 @@ class MiniLlamaLM(nn.Module):
                     {
                         "input_norm": RMSNorm(config.hidden_size, config.rms_norm_eps),
                         "post_norm": RMSNorm(config.hidden_size, config.rms_norm_eps),
-                        "q_proj": nn.Linear(config.hidden_size, config.num_attention_heads * config.head_dim, bias=False),
-                        "k_proj": nn.Linear(config.hidden_size, config.num_key_value_heads * config.head_dim, bias=False),
-                        "v_proj": nn.Linear(config.hidden_size, config.num_key_value_heads * config.head_dim, bias=False),
+                        "q_proj": nn.Linear(
+                            config.hidden_size,
+                            config.num_attention_heads * config.head_dim,
+                            bias=False,
+                        ),
+                        "k_proj": nn.Linear(
+                            config.hidden_size,
+                            config.num_key_value_heads * config.head_dim,
+                            bias=False,
+                        ),
+                        "v_proj": nn.Linear(
+                            config.hidden_size,
+                            config.num_key_value_heads * config.head_dim,
+                            bias=False,
+                        ),
                         "o_proj": nn.Linear(config.num_attention_heads * config.head_dim, config.hidden_size, bias=False),
                         "gate_proj": nn.Linear(config.hidden_size, config.intermediate_size, bias=False),
                         "up_proj": nn.Linear(config.hidden_size, config.intermediate_size, bias=False),
@@ -96,13 +116,13 @@ class MiniLlamaLM(nn.Module):
                 earlier prompt prefix.
         """
         bsz, seqlen, _ = hidden.shape
-        q = layer["q_proj"](hidden).view(
+        q = layer["q_proj"](hidden).reshape(
             bsz, seqlen, self.config.num_attention_heads, self.config.head_dim
         )
-        k = layer["k_proj"](hidden).view(
+        k = layer["k_proj"](hidden).reshape(
             bsz, seqlen, self.config.num_key_value_heads, self.config.head_dim
         )
-        v = layer["v_proj"](hidden).view(
+        v = layer["v_proj"](hidden).reshape(
             bsz, seqlen, self.config.num_key_value_heads, self.config.head_dim
         )
         q = apply_rope(q, positions, self.config.rope_theta, rope_scaling=self.config.rope_scaling)
@@ -136,47 +156,65 @@ class MiniLlamaLM(nn.Module):
         query_lens = torch.tensor(lengths, device=device, dtype=torch.long)
         # `cached_seq_len` is how many tokens for this request are already in
         # the KV cache before the current chunk runs.
-        past_lens = torch.tensor([req.cached_seq_len for req in requests], device=device, dtype=torch.long)
+        past_lengths = [req.cached_seq_len for req in requests]
+        past_lens = torch.tensor(past_lengths, device=device, dtype=torch.long)
         # Each query token attends over the previously cached tokens plus the
         # current chunk being appended in this step.
         key_lens = past_lens + query_lens
+        key_lengths = [
+            past_len + query_len
+            for past_len, query_len in zip(past_lengths, lengths, strict=True)
+        ]
+        max_key_len = max(key_lengths) if key_lengths else 0
         # The block table keeps the logical-to-physical page mapping for each
         # request. The kernel path still needs this even though we gather into a
         # padded batch tensor for teaching clarity.
         block_tables = kv_cache.block_tables_tensor(
             [req.block_ids for req in requests],
-            key_lens.tolist(),
+            key_lengths,
         )
+        cu_seqlens_q = build_cu_seqlens(query_lens)
+        key_lens_i32 = key_lens.to(dtype=torch.int32)
+        block_tables_i32 = block_tables.to(dtype=torch.int32)
+        triton_decode_metadata = None
+        decode_slot_mapping = None
+        if lengths and all(length == 1 for length in lengths):
+            slots = []
+            for req, past_len in zip(requests, past_lengths, strict=True):
+                logical_block = past_len // kv_cache.block_size
+                block_offset = past_len % kv_cache.block_size
+                slots.append(req.block_ids[logical_block] * kv_cache.block_size + block_offset)
+            decode_slot_mapping = torch.tensor(slots, device=device, dtype=torch.long)
+            triton_decode_metadata = build_triton_decode_metadata(
+                cu_seqlens_q=cu_seqlens_q,
+                key_lens=key_lens_i32,
+                block_tables=block_tables_i32,
+                max_seqlen_k=max_key_len,
+                num_kv_heads=self.config.num_key_value_heads,
+            )
         return AttentionBatchMetadata(
             query_lens=query_lens,
             past_lens=past_lens,
             key_lens=key_lens,
-            cu_seqlens_q=build_cu_seqlens(query_lens),
+            key_lens_i32=key_lens_i32,
+            cu_seqlens_q=cu_seqlens_q,
             block_tables=block_tables,
+            block_tables_i32=block_tables_i32,
+            total_queries=sum(lengths),
+            max_key_len=max_key_len,
+            triton_decode_metadata=triton_decode_metadata,
+            decode_slot_mapping=decode_slot_mapping,
         )
 
-    def _forward_request_batch(
+    def _forward_with_metadata(
         self,
-        requests: list[RequestState],
         input_ids: torch.Tensor,
         positions: torch.Tensor,
-        lengths: list[int],
+        metadata: AttentionBatchMetadata,
         kv_cache: PagedKVCache,
+        block_id_lists: list[list[int]] | None = None,
     ) -> torch.Tensor:
-        """Run one batched model step covering multiple requests at once.
-
-        Args:
-            requests: Requests represented by this batch.
-            input_ids: Tokens for the current step, padded to a common width.
-                During decode this is `[B, 1]`. During prefill it is a prompt
-                chunk such as `[B, max_chunk]`.
-            positions: Absolute positions for those tokens. This is how a later
-                prompt chunk keeps the right RoPE offsets.
-            lengths: Valid query-token count per batch row.
-            kv_cache: Shared paged KV cache storing all previously computed
-                prefix tokens.
-        """
-        metadata = self._build_attention_metadata(requests, lengths, kv_cache)
+        """Run the transformer body with prebuilt attention metadata."""
         with self.profiler.section("model.embed") if self.profiler else nullcontext():
             hidden = self.embed_tokens(input_ids)
         # This mask is only about padding inside the current batched chunk.
@@ -190,9 +228,7 @@ class MiniLlamaLM(nn.Module):
         ).to(hidden.dtype)
         hidden = self._masked_residual(hidden, mask)
 
-        block_id_lists = [req.block_ids for req in requests]
-        past_lens = metadata.past_lens.tolist()
-        query_lens = metadata.query_lens.tolist()
+        block_id_lists = block_id_lists or []
 
         for layer_idx, layer in enumerate(self.layers):
             residual = hidden
@@ -212,10 +248,21 @@ class MiniLlamaLM(nn.Module):
                 query_lens=metadata.query_lens,
                 past_lens=metadata.past_lens,
                 key_lens=metadata.key_lens,
+                key_lens_i32=metadata.key_lens_i32,
+                cu_seqlens_q=metadata.cu_seqlens_q,
+                block_tables_i32=metadata.block_tables_i32,
+                total_queries=metadata.total_queries,
+                max_key_len=metadata.max_key_len,
+                triton_decode_metadata=metadata.triton_decode_metadata,
+                decode_slot_mapping=metadata.decode_slot_mapping,
             )
             # After attention consumes the current chunk, append that chunk's
             # K/V into the paged cache so later decode steps can see it.
             if not wrote_kv:
+                if not block_id_lists:
+                    raise RuntimeError("Dense KV write fallback requires block_id_lists")
+                past_lens = metadata.past_lens.tolist()
+                query_lens = metadata.query_lens.tolist()
                 with self.profiler.section("model.kv_write") if self.profiler else nullcontext():
                     kv_cache.write_batch(
                         layer_idx=layer_idx,
@@ -234,7 +281,9 @@ class MiniLlamaLM(nn.Module):
             residual = hidden
             with self.profiler.section("model.mlp") if self.profiler else nullcontext():
                 normed = layer["post_norm"](hidden)
-                ff = layer["down_proj"](swiglu(layer["gate_proj"](normed), layer["up_proj"](normed)))
+                ff = layer["down_proj"](
+                    swiglu(layer["gate_proj"](normed), layer["up_proj"](normed))
+                )
                 hidden = residual + self._masked_residual(ff, mask)
 
         with self.profiler.section("model.final_norm_lm_head") if self.profiler else nullcontext():
@@ -247,6 +296,24 @@ class MiniLlamaLM(nn.Module):
                 metadata.query_lens - 1,
             ]
             return self.lm_head(last_hidden)
+
+    def _forward_request_batch(
+        self,
+        requests: list[RequestState],
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        lengths: list[int],
+        kv_cache: PagedKVCache,
+    ) -> torch.Tensor:
+        """Run one batched model step covering multiple requests at once."""
+        metadata = self._build_attention_metadata(requests, lengths, kv_cache)
+        return self._forward_with_metadata(
+            input_ids=input_ids,
+            positions=positions,
+            metadata=metadata,
+            kv_cache=kv_cache,
+            block_id_lists=[req.block_ids for req in requests],
+        )
 
     def prefill_chunk(
         self,
@@ -296,4 +363,20 @@ class MiniLlamaLM(nn.Module):
             positions=positions,
             lengths=[1] * len(requests),
             kv_cache=kv_cache,
+        )
+
+    def decode_tokens_prebuilt(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        metadata: AttentionBatchMetadata,
+        kv_cache: PagedKVCache,
+    ) -> torch.Tensor:
+        """Run one decode forward pass using externally managed metadata tensors."""
+        return self._forward_with_metadata(
+            input_ids=input_ids,
+            positions=positions,
+            metadata=metadata,
+            kv_cache=kv_cache,
+            block_id_lists=None,
         )

@@ -1,0 +1,89 @@
+{
+  "description": "Shared real-model benchmark workload for simple_vllm_engine v3/v4. Each request uses chat messages and an arrival step.",
+  "requests": [
+    {
+      "request_id": "req-0",
+      "arrival_step": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful infrastructure analyst. Read the request closely, reason from the supplied context, and answer in a concise technical style. Focus on throughput, latency, cache behavior, batching, GPU utilization, and practical tradeoffs in LLM serving systems."
+        },
+        {
+          "role": "user",
+          "content": "Context: A team is serving a decoder-only language model behind an API. Requests have varying prompt lengths, some prompts share a long common prefix, and traffic arrives continuously rather than in one static batch. The system uses a paged KV cache, chunked prefill, and decode-first continuous batching. Operators are comparing serial execution against a vLLM-style engine and want to understand throughput, inter-token latency, time to first token, prefix-cache reuse, and memory tradeoffs. Assume the system runs on one GPU and that some requests are long enough to require multiple prefill chunks. Explain why continuous batching helps throughput when requests arrive at different times, and mention one tradeoff."
+        }
+      ]
+    },
+    {
+      "request_id": "req-1",
+      "arrival_step": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful infrastructure analyst. Read the request closely, reason from the supplied context, and answer in a concise technical style. Focus on throughput, latency, cache behavior, batching, GPU utilization, and practical tradeoffs in LLM serving systems."
+        },
+        {
+          "role": "user",
+          "content": "Context: A team is serving a decoder-only language model behind an API. Requests have varying prompt lengths, some prompts share a long common prefix, and traffic arrives continuously rather than in one static batch. The system uses a paged KV cache, chunked prefill, and decode-first continuous batching. Operators are comparing serial execution against a vLLM-style engine and want to understand throughput, inter-token latency, time to first token, prefix-cache reuse, and memory tradeoffs. Assume the system runs on one GPU and that some requests are long enough to require multiple prefill chunks. Explain how chunked prefill interacts with decode latency, and when a smaller max batched token budget is helpful."
+        }
+      ]
+    },
+    {
+      "request_id": "req-2",
+      "arrival_step": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful infrastructure analyst. Read the request closely, reason from the supplied context, and answer in a concise technical style. Focus on throughput, latency, cache behavior, batching, GPU utilization, and practical tradeoffs in LLM serving systems."
+        },
+        {
+          "role": "user",
+          "content": "Context: A team is serving a decoder-only language model behind an API. Requests have varying prompt lengths, some prompts share a long common prefix, and traffic arrives continuously rather than in one static batch. The system uses a paged KV cache, chunked prefill, and decode-first continuous batching. Operators are comparing serial execution against a vLLM-style engine and want to understand throughput, inter-token latency, time to first token, prefix-cache reuse, and memory tradeoffs. Assume the system runs on one GPU and that some requests are long enough to require multiple prefill chunks. Describe how prefix caching helps when several requests share the same long instruction prefix but ask different follow-up questions."
+        }
+      ]
+    },
+    {
+      "request_id": "req-3",
+      "arrival_step": 2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful infrastructure analyst. Read the request closely, reason from the supplied context, and answer in a concise technical style. Focus on throughput, latency, cache behavior, batching, GPU utilization, and practical tradeoffs in LLM serving systems."
+        },
+        {
+          "role": "user",
+          "content": "Context: A team is serving a decoder-only language model behind an API. Requests have varying prompt lengths, some prompts share a long common prefix, and traffic arrives continuously rather than in one static batch. The system uses a paged KV cache, chunked prefill, and decode-first continuous batching. Operators are comparing serial execution against a vLLM-style engine and want to understand throughput, inter-token latency, time to first token, prefix-cache reuse, and memory tradeoffs. Assume the system runs on one GPU and that some requests are long enough to require multiple prefill chunks. Summarize how a paged KV cache reduces memory movement and why a block table is needed when physical pages are not contiguous."
+        }
+      ]
+    },
+    {
+      "request_id": "req-4",
+      "arrival_step": 2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful infrastructure analyst. Read the request closely, reason from the supplied context, and answer in a concise technical style. Focus on throughput, latency, cache behavior, batching, GPU utilization, and practical tradeoffs in LLM serving systems."
+        },
+        {
+          "role": "user",
+          "content": "Context: A team is serving a decoder-only language model behind an API. Requests have varying prompt lengths, some prompts share a long common prefix, and traffic arrives continuously rather than in one static batch. The system uses a paged KV cache, chunked prefill, and decode-first continuous batching. Operators are comparing serial execution against a vLLM-style engine and want to understand throughput, inter-token latency, time to first token, prefix-cache reuse, and memory tradeoffs. Assume the system runs on one GPU and that some requests are long enough to require multiple prefill chunks. Give a short explanation of why decode is more memory-bound than prefill and how that affects batching decisions."
+        }
+      ]
+    },
+    {
+      "request_id": "req-5",
+      "arrival_step": 4,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a careful infrastructure analyst. Read the request closely, reason from the supplied context, and answer in a concise technical style. Focus on throughput, latency, cache behavior, batching, GPU utilization, and practical tradeoffs in LLM serving systems."
+        },
+        {
+          "role": "user",
+          "content": "Context: A team is serving a decoder-only language model behind an API. Requests have varying prompt lengths, some prompts share a long common prefix, and traffic arrives continuously rather than in one static batch. The system uses a paged KV cache, chunked prefill, and decode-first continuous batching. Operators are comparing serial execution against a vLLM-style engine and want to understand throughput, inter-token latency, time to first token, prefix-cache reuse, and memory tradeoffs. Assume the system runs on one GPU and that some requests are long enough to require multiple prefill chunks. The team wants to compare a serial baseline with a vLLM-style engine. Explain what improvement prefix caching alone can provide, and what additional benefit continuous batching adds."
+        }
+      ]
+    }
+  ]
+}
