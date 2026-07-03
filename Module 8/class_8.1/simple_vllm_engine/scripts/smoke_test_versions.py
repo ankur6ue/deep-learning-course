@@ -11,18 +11,18 @@ from pathlib import Path
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_VERSIONS = [f"v{idx}" for idx in range(1, 9)]
+DEFAULT_VERSIONS = [f"v{idx}" for idx in range(1, 11)]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run small deterministic correctness smoke tests for v1-v8."
+        description="Run small deterministic correctness smoke tests for v1-v10."
     )
     parser.add_argument(
         "--versions",
         nargs="*",
         default=DEFAULT_VERSIONS,
-        help="Version folders to test, e.g. v1 v2 v3. Defaults to v1-v8.",
+        help="Version folders to test, e.g. v1 v2 v3. Defaults to v1-v10.",
     )
     parser.add_argument(
         "--child-version",
@@ -170,7 +170,7 @@ def run_child(version: str) -> None:
         print(f"v7: PASS async_gpu_state_invariants ids={ids}")
         return
 
-    if version == "v8":
+    if version in {"v8", "v9"}:
         ids = run_engine(
             engine_config(
                 enable_decode_cuda_graphs=True,
@@ -181,7 +181,21 @@ def run_child(version: str) -> None:
                 enable_async_output_processing=True,
             )
         )
-        print(f"v8: PASS safe_graph_config_invariants ids={ids}")
+        print(f"{version}: PASS safe_graph_config_invariants ids={ids}")
+        return
+
+    if version == "v10":
+        ids = run_engine(
+            engine_config(
+                attention_backend="triton_paged",
+                enable_decode_cuda_graphs=False,
+                enable_gpu_decode_state=True,
+                enable_triton_decode_metadata_kernel=True,
+                enable_eager_decode_workspace=True,
+                enable_async_output_processing=True,
+            )
+        )
+        print(f"v10: PASS architecture_adapter_invariants ids={ids}")
         return
 
     raise AssertionError(f"Unhandled version: {version}")

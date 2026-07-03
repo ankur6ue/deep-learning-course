@@ -5,6 +5,7 @@ from dataclasses import dataclass, fields
 from importlib import import_module
 import json
 import statistics
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -93,7 +94,7 @@ def parse_args(settings: VersionSettings) -> argparse.Namespace:
         action="store_true",
         help=(
             "Enable the toy prefix-cache bookkeeping. It is off by default here "
-            "because prefix caching is not one of the v1-v8 teaching steps."
+            "because prefix caching is not one of the v1-v9 teaching steps."
         ),
     )
     parser.add_argument(
@@ -231,7 +232,9 @@ def make_engine_config(args: argparse.Namespace, settings: VersionSettings) -> A
         device=args.device,
         dtype=dtype,
         enable_timing=args.timing,
-        enable_decode_cuda_graphs=settings.enable_decode_cuda_graphs,
+        enable_decode_cuda_graphs=(
+            settings.enable_decode_cuda_graphs or args.unsafe_decode_cuda_graphs
+        ),
         unsafe_decode_cuda_graphs=args.unsafe_decode_cuda_graphs,
         enable_torch_compile_model_body=settings.enable_torch_compile,
         torch_compile_scope=compile_scope,
@@ -338,11 +341,18 @@ def main(settings: VersionSettings) -> None:
 
     print()
     print_workload_summary(specs)
-    wall_s, results, tokenizer, timings, decode_graph_warmup, kernel_summary = run_workload(
-        args.model_path,
-        engine_config,
-        specs,
-    )
+    try:
+        wall_s, results, tokenizer, timings, decode_graph_warmup, kernel_summary = run_workload(
+            args.model_path,
+            engine_config,
+            specs,
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+        if "FlashAttention backend requested" in message:
+            print(message, file=sys.stderr)
+            raise SystemExit(2) from None
+        raise
 
     if kernel_summary:
         print("Kernel summary:")

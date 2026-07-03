@@ -99,15 +99,26 @@ class DecodeGpuState:
         # Keeping this on GPU avoids synchronizing each sampled token back to
         # CPU just to feed it into the next decode step.
         self.last_token_ids = torch.zeros(max_num_reqs, device=device, dtype=torch.long)
+        # `request_slots_for_batch()` translates a Python list of RequestState
+        # objects into the stable integer slots used by GPU kernels. `slot_cpu`
+        # is the pinned CPU staging buffer that Python fills from
+        # `request_id_to_slot`.
         self.slot_cpu = torch.empty(
             max_num_reqs,
             dtype=torch.long,
             pin_memory=self.enabled,
         )
+        # `slot_workspace` is the reusable GPU copy of `slot_cpu`. Kernels use
+        # these values to gather/scatter per-request rows in `last_token_ids`.
+        # Reusing one buffer avoids allocating a new tiny CUDA tensor every
+        # decode step.
         self.slot_workspace = torch.empty(max_num_reqs, device=device, dtype=torch.long)
+        # Only CPU-visible generated tokens use a side stream. The model,
+        # metadata prep, and slot workspace copies stay on the main stream.
         self.copy_stream = torch.cuda.Stream(device) if self.enabled else None
 
     def allocate(self, request: RequestState) -> None:
+        """Reserve a stable GPU slot for one active request."""
         if request.request_id in self.request_id_to_slot:
             return
         if not self.free_slots:
@@ -118,13 +129,22 @@ class DecodeGpuState:
             self.last_token_ids[slot] = 0
 
     def release(self, request: RequestState) -> None:
+        """Return a request's GPU slot to the free list when it finishes."""
         slot = self.request_id_to_slot.pop(request.request_id, None)
         if slot is not None:
             if self.enabled:
                 self.last_token_ids[slot] = 0
             self.free_slots.append(slot)
 
-    def _slot_ids(self, requests: list[RequestState]) -> torch.Tensor:
+    def request_slots_for_batch(self, requests: list[RequestState]) -> torch.Tensor:
+        """Return GPU slot ids for this transient decode batch.
+
+        The scheduler hands us Python request objects in batch order. GPU
+        kernels cannot index Python dicts, so we first write each request's
+        stable slot id into `slot_cpu`, then copy that compact row list into
+        `slot_workspace`. The returned tensor is a view of the first
+        `len(requests)` entries of that reusable GPU workspace.
+        """
         for idx, req in enumerate(requests):
             self.slot_cpu[idx] = self.request_id_to_slot[req.request_id]
         out = self.slot_workspace[: len(requests)]
@@ -132,6 +152,7 @@ class DecodeGpuState:
         return out
 
     def set_last_token_from_cpu(self, request: RequestState, token_id: int) -> None:
+        """Seed a request's GPU last-token row from a CPU token id."""
         if not self.enabled:
             return
         self.allocate(request)
@@ -145,14 +166,21 @@ class DecodeGpuState:
         *,
         pad_token_id: int,
     ) -> bool:
+        """Fill `dst` with the GPU-resident last token for each request.
+
+        This builds the next decode input without synchronizing the sampled
+        tokens back to CPU. Extra rows are padded for fixed-size decode graph or
+        workspace buffers.
+        """
         if not self.enabled:
             return False
         if not requests:
             return True
-        slots = self._slot_ids(requests)
-        dst[: len(requests)].copy_(self.last_token_ids.index_select(0, slots))
-        if dst.shape[0] > len(requests):
-            dst[len(requests) :].fill_(pad_token_id)
+        self.request_slots_for_batch(requests)
+        count = len(requests)
+        dst[:count].copy_(self.last_token_ids.index_select(0, self.slot_workspace[:count]))
+        if dst.shape[0] > count:
+            dst[count:].fill_(pad_token_id)
         return True
 
     def update_last_tokens(
@@ -160,17 +188,44 @@ class DecodeGpuState:
         requests: list[RequestState],
         next_tokens: torch.Tensor,
     ) -> None:
+        """Scatter sampled GPU tokens after building slots from request ids.
+
+        This safe wrapper is useful for prefill completion, where no decode
+        prepare step has already staged slots for the sampled rows.
+        """
         if not self.enabled or not requests:
             return
-        slots = self._slot_ids(requests)
+        self.request_slots_for_batch(requests)
+        self.update_last_tokens_for_staged_slots(next_tokens, len(requests))
+
+    def update_last_tokens_for_staged_slots(
+        self,
+        next_tokens: torch.Tensor,
+        count: int,
+    ) -> None:
+        """Scatter sampled tokens using DecodeGpuState.slot_workspace."""
+        if not self.enabled or count <= 0:
+            return
+        self.update_last_tokens_for_slots(self.slot_workspace, next_tokens, count)
+
+    def update_last_tokens_for_slots(
+        self,
+        req_slots: torch.Tensor,
+        next_tokens: torch.Tensor,
+        count: int,
+    ) -> None:
+        """Scatter sampled GPU tokens using already-staged request slots."""
+        if not self.enabled or count <= 0:
+            return
         update_decode_state(
-            req_slots=slots,
+            req_slots=req_slots,
             next_tokens=next_tokens,
             last_token_ids=self.last_token_ids,
-            count=len(requests),
+            count=count,
         )
 
     def async_copy_tokens(self, next_tokens: torch.Tensor, count: int) -> AsyncTokenCopy:
+        """Start the deferred GPU-to-CPU copy used only for output bookkeeping."""
         tokens = next_tokens[:count].detach()
         if not self.enabled or self.copy_stream is None:
             return AsyncTokenCopy(tokens.to("cpu"))
@@ -239,17 +294,12 @@ class PrefillWorker:
                 start = req.prompt_tokens_computed
                 end = start + item.chunk_len
                 chunk_ids = req.prompt_ids[start:end]
-                # Prefill only writes prompt tokens. Generated-token KV entries
-                # do not exist yet for requests in the prefill queue, so express
-                # capacity in prompt-token terms instead of the more general
-                # cached_seq_len. Example: if 32 prompt tokens are already
-                # computed and this chunk has 8 tokens, we need capacity for the
-                # first 40 prompt tokens.
+                # Prefill only writes prompt-token K/V. `end` is the number of
+                # prompt tokens that will exist in the cache after this chunk.
                 req.block_ids = self.kv_cache.ensure_capacity(req.block_ids, end)
                 input_ids[idx, : item.chunk_len] = torch.tensor(chunk_ids, device=device, dtype=torch.long)
-                # Positions are absolute within the full prompt, not relative to
-                # this chunk. RoPE needs absolute positions so chunked prefill
-                # matches a single full-prompt prefill.
+                # RoPE positions are absolute within the full prompt, not relative
+                # to this chunk.
                 positions[idx, : item.chunk_len] = torch.arange(start, end, device=device, dtype=torch.long)
                 lengths.append(item.chunk_len)
 
@@ -318,6 +368,11 @@ class PrefillWorker:
                 self.decode_gpu_state.update_last_tokens(deferred_requests, deferred_tokens)
                 for out_idx, req in enumerate(deferred_requests):
                     req.defer_generated_token_copy(token_copy, out_idx)
+                    # This cannot check EOS because the sampled token is still
+                    # deferred. It only enforces max_new_tokens. That matters
+                    # for max_new_tokens=1: the first token sampled by final
+                    # prefill should finish the request instead of scheduling
+                    # an unnecessary first decode step.
                     if req.should_stop(
                         self.engine_config.eos_token_id,
                         ignore_eos=True,
@@ -375,9 +430,7 @@ class DecodeEagerWorkspace:
         self.k_descale = torch.ones(descale_shape, device=device, dtype=torch.float32)
         self.v_descale = torch.ones(descale_shape, device=device, dtype=torch.float32)
 
-        self.req_slots_host = torch.empty(self.max_batch_size, dtype=torch.long, pin_memory=pin_host)
         self.cached_seq_lens_host = torch.empty(self.max_batch_size, dtype=torch.long, pin_memory=pin_host)
-        self.req_slots = torch.empty(self.max_batch_size, device=device, dtype=torch.long)
         self.cached_seq_lens = torch.empty(self.max_batch_size, device=device, dtype=torch.long)
         self.block_tables_host: torch.Tensor
         self.block_tables: torch.Tensor
@@ -474,7 +527,6 @@ class DecodeEagerWorkspace:
             zip(requests, past_lengths, key_lengths, strict=True)
         ):
             blocks_needed = self.kv_cache.blocks_needed(key_len)
-            self.req_slots_host[row_idx] = self.decode_gpu_state.request_id_to_slot[req.request_id]
             self.cached_seq_lens_host[row_idx] = past_len
             # `blocks_needed` is the number of logical KV pages covered by this
             # request's current attention key length. Because this toy engine does
@@ -497,10 +549,9 @@ class DecodeEagerWorkspace:
             for block_idx, block_id in enumerate(req.block_ids[:blocks_needed]):
                 self.block_tables_host[row_idx, block_idx] = block_id
 
-        # Move compact metadata to GPU once per decode step. A Triton helper then
-        # derives input_ids, positions, slot_mapping, and the int32 block table
-        # form used by paged attention metadata.
-        self.req_slots[:batch_size].copy_(self.req_slots_host[:batch_size], non_blocking=True)
+        # Move compact metadata to GPU once per decode step. Request slots come
+        # from DecodeGpuState's shared slot workspace; this eager workspace owns
+        # sequence lengths, block tables, and attention metadata outputs.
         self.cached_seq_lens[:batch_size].copy_(self.cached_seq_lens_host[:batch_size], non_blocking=True)
         self.block_tables[:batch_size].copy_(self.block_tables_host[:batch_size], non_blocking=True)
 
@@ -512,9 +563,12 @@ class DecodeEagerWorkspace:
         slot_mapping = self.slot_mapping[:batch_size]
         block_tables = self.block_tables[:batch_size]
         block_tables_i32 = self.block_tables_i32[:batch_size]
+        # GPU row ids for this batch: request_id -> stable slot. The prep
+        # kernel uses these slots to read last_token_ids without a CPU D2H sync.
+        req_slots = self.decode_gpu_state.request_slots_for_batch(requests)
 
         prepare_decode_inputs(
-            req_slots=self.req_slots[:batch_size],
+            req_slots=req_slots,
             cached_seq_lens=self.cached_seq_lens[:batch_size],
             block_tables=block_tables,
             last_token_ids=self.decode_gpu_state.last_token_ids,
@@ -683,21 +737,39 @@ class DecodeWorker:
         with self.profiler.section("decode.postprocess"):
             next_tokens = sample_greedy(logits)
             token_copy = self.decode_gpu_state.async_copy_tokens(next_tokens, len(requests))
-            self.decode_gpu_state.update_last_tokens(requests, next_tokens)
+            self.decode_gpu_state.update_last_tokens_for_staged_slots(next_tokens, len(requests))
             if self.engine_config.enable_async_output_processing and self.decode_gpu_state.enabled:
-                # Async path: the next decode input stays on GPU. CPU-visible
-                # output tokens are resolved later by SimpleVLLMEngine.run().
+                # Async decode keeps two pieces of state intentionally separate:
+                #
+                # 1. GPU feedback loop for the next decode step.
+                #    The update above has already copied next_tokens[idx] into
+                #    DecodeGpuState.last_token_ids[request_slot]. The next decode
+                #    batch reads that GPU tensor directly, so this branch does
+                #    not need to turn the sampled token into a Python int.
+                #
+                # 2. CPU-visible output/EOS bookkeeping.
+                #    token_copy is an in-flight device-to-host copy. We attach
+                #    the relevant row to each request below, and run() resolves
+                #    it later when it appends output text or checks EOS.
                 for idx, req in enumerate(requests):
+                    # This decode forward wrote K/V for the token that entered
+                    # the model on this step, so the cached generated length
+                    # advances even though the newly sampled token has not been
+                    # resolved on CPU yet.
                     req.generated_tokens_in_cache += 1
+                    # Remember where this request's sampled output token will
+                    # be found once the async D2H copy is consumed.
                     req.defer_generated_token_copy(token_copy, idx)
+                    # With ignore_eos=True this only enforces length limits.
+                    # EOS depends on the actual sampled token value and is
+                    # checked later, when the deferred copy is resolved.
                     if req.should_stop(
                         self.engine_config.eos_token_id,
                         ignore_eos=True,
                     ):
                         continue
-                    # Same placeholder convention as prefill: with async output
-                    # processing, the actual next token stays in
-                    # DecodeGpuState.last_token_ids on GPU.
+                    # CPU-side readiness marker only. In async mode the real
+                    # next input token stays in DecodeGpuState.last_token_ids.
                     req.next_input_token_id = self.engine_config.pad_token_id
             else:
                 # Blocking path: force sampled ids to CPU now. This is simpler

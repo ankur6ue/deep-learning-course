@@ -29,7 +29,7 @@ def _version_symbol(module_name: str, symbol_name: str) -> Any:
     Each teaching folder exposes the same package name, `simple_vllm_engine`.
     The caller controls which version is active by putting `vN/` first on
     `sys.path`. This shared loader then imports the active version's config,
-    model, and engine classes without knowing whether it is serving v2 or v8.
+    model, and engine classes without knowing whether it is serving v2 or v9.
     """
     module = import_module(f"simple_vllm_engine.{module_name}")
     return getattr(module, symbol_name)
@@ -56,7 +56,12 @@ def _unwrap_text_config(hf_config: Any) -> Any:
     teaching engine only needs that decoder sub-config.
     """
     text_config = getattr(hf_config, "text_config", None)
-    return text_config if text_config is not None else hf_config
+    if text_config is not None:
+        return text_config
+    get_text_config = getattr(hf_config, "get_text_config", None)
+    if callable(get_text_config):
+        return get_text_config()
+    return hf_config
 
 
 def load_model_config_from_pretrained(
@@ -86,6 +91,9 @@ def load_model_config_from_pretrained(
         "LlamaForCausalLM",
         "MistralForCausalLM",
         "Mistral3ForConditionalGeneration",
+        "Gemma4ForCausalLM",
+        "Gemma4ForConditionalGeneration",
+        "Gemma4UnifiedForConditionalGeneration",
     }
     if architectures and not (set(architectures) & supported_architectures):
         raise ValueError(
@@ -95,7 +103,17 @@ def load_model_config_from_pretrained(
 
     hf_config = _unwrap_text_config(top_config)
     model_type = getattr(hf_config, "model_type", None)
-    if model_type not in {"llama", "mistral", "ministral3"}:
+    is_gemma4 = model_type in {
+        "gemma4",
+        "gemma4_text",
+        "gemma4_unified",
+        "gemma4_unified_text",
+    } or bool(set(architectures) & {
+        "Gemma4ForCausalLM",
+        "Gemma4ForConditionalGeneration",
+        "Gemma4UnifiedForConditionalGeneration",
+    })
+    if model_type not in {"llama", "mistral", "ministral3"} and not is_gemma4:
         raise ValueError(f"Unsupported decoder model_type: {model_type!r}")
 
     rope_scaling = (
@@ -115,9 +133,67 @@ def load_model_config_from_pretrained(
 
     attention_head_dim = getattr(hf_config, "head_dim", None)
     ModelConfig = _version_symbol("config", "ModelConfig")
+    model_config_fields = {field.name for field in fields(ModelConfig)} if is_dataclass(ModelConfig) else set()
+
+    if is_gemma4:
+        if "architecture" not in model_config_fields:
+            raise ValueError("Gemma 4 requires simple_vllm_engine v10 or newer")
+        if getattr(hf_config, "enable_moe_block", False):
+            raise ValueError("This teaching loader does not yet support Gemma 4 MoE checkpoints")
+        if int(getattr(hf_config, "hidden_size_per_layer_input", 0) or 0) != 0:
+            raise ValueError("This teaching loader does not yet support Gemma 4 per-layer embeddings")
+
+        layer_types = tuple(str(x) for x in hf_config.layer_types)
+        attention_k_eq_v = bool(getattr(hf_config, "attention_k_eq_v", False))
+        global_head_dim = int(getattr(hf_config, "global_head_dim", hf_config.head_dim))
+        global_kv_heads = int(
+            getattr(hf_config, "num_global_key_value_heads", hf_config.num_key_value_heads)
+        )
+        head_dim_by_layer = tuple(
+            global_head_dim if layer_type == "full_attention" else int(hf_config.head_dim)
+            for layer_type in layer_types
+        )
+        kv_heads_by_layer = tuple(
+            global_kv_heads if (attention_k_eq_v and layer_type == "full_attention")
+            else int(hf_config.num_key_value_heads)
+            for layer_type in layer_types
+        )
+        rope_by_layer_type = {
+            str(name): dict(params)
+            for name, params in dict(hf_config.rope_parameters).items()
+        }
+        return _filtered_dataclass_init(
+            ModelConfig,
+            {
+                "architecture": "gemma4",
+                "vocab_size": int(hf_config.vocab_size),
+                "hidden_size": int(hf_config.hidden_size),
+                "intermediate_size": int(hf_config.intermediate_size),
+                "num_layers": int(hf_config.num_hidden_layers),
+                "num_attention_heads": int(hf_config.num_attention_heads),
+                "num_key_value_heads": int(hf_config.num_key_value_heads),
+                "attention_head_dim": int(hf_config.head_dim),
+                "max_position_embeddings": max_position_embeddings,
+                "rope_theta": float(getattr(hf_config, "rope_theta", 10000.0)),
+                "rope_scaling": None,
+                "rms_norm_eps": float(hf_config.rms_norm_eps),
+                "hidden_activation": str(hf_config.hidden_activation),
+                "tie_word_embeddings": bool(getattr(hf_config, "tie_word_embeddings", True)),
+                "embedding_scale": float(hf_config.hidden_size) ** 0.5,
+                "final_logit_softcapping": getattr(hf_config, "final_logit_softcapping", None),
+                "layer_types": layer_types,
+                "head_dim_by_layer": head_dim_by_layer,
+                "kv_heads_by_layer": kv_heads_by_layer,
+                "sliding_window": int(hf_config.sliding_window),
+                "rope_scaling_by_layer_type": rope_by_layer_type,
+                "attention_k_eq_v": attention_k_eq_v,
+            },
+        )
+
     return _filtered_dataclass_init(
         ModelConfig,
         {
+            "architecture": "mistral" if model_type in {"mistral", "ministral3"} else "llama",
             "vocab_size": int(hf_config.vocab_size),
             "hidden_size": int(hf_config.hidden_size),
             "intermediate_size": int(hf_config.intermediate_size),
@@ -149,6 +225,27 @@ def _detect_weight_prefixes(weight_map: dict[str, str]) -> tuple[str, str]:
     else:
         raise KeyError("Could not find lm_head tensor in checkpoint index")
     return model_prefix, lm_head_prefix
+
+
+def _load_weight_map(root: Path) -> dict[str, str]:
+    """Return HF tensor name -> safetensors file name.
+
+    Large checkpoints are usually sharded and include
+    `model.safetensors.index.json`. The Gemma 4 12B text checkpoint we use here
+    is a single 23 GB safetensors file with no index, so build the same mapping
+    by reading only the safetensors metadata keys.
+    """
+    index_path = root / "model.safetensors.index.json"
+    if index_path.exists():
+        return json.loads(index_path.read_text())["weight_map"]
+
+    single_file = root / "model.safetensors"
+    if not single_file.exists():
+        raise FileNotFoundError(f"Missing checkpoint index or single safetensors file under {root}")
+    from safetensors import safe_open
+
+    with safe_open(str(single_file), framework="pt", device="cpu") as handle:
+        return {key: single_file.name for key in handle.keys()}
 
 
 def _uses_packed_projections(model: torch.nn.Module) -> bool:
@@ -226,6 +323,116 @@ def _packed_hf_groups(num_layers: int, model_prefix: str) -> dict[str, list[str]
     return groups
 
 
+def _load_gemma4_weights(
+    model: torch.nn.Module,
+    model_path: str,
+    dtype: torch.dtype | None = None,
+) -> None:
+    """Load a Gemma 4 text checkpoint into v10's explicit Gemma modules.
+
+    The mapping is intentionally direct:
+
+    - `model.language_model.layers.N.self_attn.q_proj.weight`
+      -> `layers.N.q_proj.weight`
+    - full-attention layers have no checkpoint `v_proj`; the model has no
+      `v_proj` Parameter for those layers either.
+    - `lm_head.weight` is tied to `embed_tokens.weight`, so there is no separate
+      tensor to load.
+    """
+    from safetensors import safe_open
+
+    root = Path(model_path)
+    weight_map = _load_weight_map(root)
+    if "model.language_model.embed_tokens.weight" in weight_map:
+        prefix = "model.language_model"
+    elif "model.embed_tokens.weight" in weight_map:
+        prefix = "model"
+    else:
+        raise KeyError("Could not find Gemma 4 text embedding tensor")
+
+    target_state = model.state_dict()
+    loaded: set[str] = set()
+    shard_handles = {}
+
+    def get_tensor(hf_key: str) -> torch.Tensor:
+        shard_name = weight_map.get(hf_key)
+        if shard_name is None:
+            raise KeyError(f"Missing Gemma 4 checkpoint tensor: {hf_key}")
+        handle = shard_handles.get(shard_name)
+        if handle is None:
+            handle = safe_open(str(root / shard_name), framework="pt", device="cpu")
+            shard_handles[shard_name] = handle
+        return handle.get_tensor(hf_key)
+
+    def copy_tensor(engine_key: str, tensor: torch.Tensor) -> None:
+        target = target_state[engine_key]
+        if tuple(tensor.shape) != tuple(target.shape):
+            raise ValueError(
+                f"Shape mismatch for {engine_key}: checkpoint {tuple(tensor.shape)} "
+                f"!= model {tuple(target.shape)}"
+            )
+        target_dtype = dtype if dtype is not None else target.dtype
+        if tensor.dtype != target_dtype:
+            tensor = tensor.to(dtype=target_dtype)
+        target.copy_(tensor)
+        loaded.add(engine_key)
+
+    def copy(engine_key: str, hf_key: str) -> None:
+        copy_tensor(engine_key, get_tensor(hf_key))
+
+    try:
+        copy("embed_tokens.weight", f"{prefix}.embed_tokens.weight")
+        copy("norm.weight", f"{prefix}.norm.weight")
+        if "lm_head.weight" in target_state:
+            # Tied embedding: loading embed_tokens has already populated the
+            # same Parameter storage used by lm_head.
+            loaded.add("lm_head.weight")
+
+        for layer_idx, layer in enumerate(model.layers):
+            base = f"{prefix}.layers.{layer_idx}"
+            dst = f"layers.{layer_idx}"
+            copy(f"{dst}.input_norm.weight", f"{base}.input_layernorm.weight")
+            copy(f"{dst}.post_attention_norm.weight", f"{base}.post_attention_layernorm.weight")
+            copy(f"{dst}.pre_feedforward_norm.weight", f"{base}.pre_feedforward_layernorm.weight")
+            copy(f"{dst}.post_feedforward_norm.weight", f"{base}.post_feedforward_layernorm.weight")
+            copy(f"{dst}.layer_scalar", f"{base}.layer_scalar")
+            q_weight = get_tensor(f"{base}.self_attn.q_proj.weight")
+            k_weight = get_tensor(f"{base}.self_attn.k_proj.weight")
+            if getattr(layer, "qkv_proj", None) is not None:
+                v_weight = get_tensor(f"{base}.self_attn.v_proj.weight")
+                copy_tensor(f"{dst}.qkv_proj.weight", torch.cat([q_weight, k_weight, v_weight], dim=0))
+            elif getattr(layer, "qk_proj", None) is not None:
+                copy_tensor(f"{dst}.qk_proj.weight", torch.cat([q_weight, k_weight], dim=0))
+            else:
+                copy_tensor(f"{dst}.q_proj.weight", q_weight)
+                copy_tensor(f"{dst}.k_proj.weight", k_weight)
+                if getattr(layer, "v_proj", None) is not None:
+                    copy(f"{dst}.v_proj.weight", f"{base}.self_attn.v_proj.weight")
+            copy(f"{dst}.q_norm.weight", f"{base}.self_attn.q_norm.weight")
+            copy(f"{dst}.k_norm.weight", f"{base}.self_attn.k_norm.weight")
+            copy(f"{dst}.o_proj.weight", f"{base}.self_attn.o_proj.weight")
+
+            gate = get_tensor(f"{base}.mlp.gate_proj.weight")
+            up = get_tensor(f"{base}.mlp.up_proj.weight")
+            gate_up = torch.cat([gate, up], dim=0)
+            target = target_state[f"{dst}.gate_up_proj.weight"]
+            target_dtype = dtype if dtype is not None else target.dtype
+            if gate_up.dtype != target_dtype:
+                gate_up = gate_up.to(dtype=target_dtype)
+            target.copy_(gate_up)
+            loaded.add(f"{dst}.gate_up_proj.weight")
+            copy(f"{dst}.down_proj.weight", f"{base}.mlp.down_proj.weight")
+    finally:
+        for handle in shard_handles.values():
+            close = getattr(handle, "close", None)
+            if callable(close):
+                close()
+
+    missing = set(target_state) - loaded
+    if missing:
+        raise KeyError(f"Missing Gemma 4 engine tensors after load: {sorted(missing)}")
+
+
 def load_pretrained_weights(
     model: torch.nn.Module,
     model_path: str,
@@ -240,12 +447,11 @@ def load_pretrained_weights(
     from safetensors.torch import load_file
 
     root = Path(model_path)
-    index_path = root / "model.safetensors.index.json"
-    if not index_path.exists():
-        raise FileNotFoundError(f"Missing checkpoint index: {index_path}")
+    if getattr(model.config, "architecture", None) == "gemma4":
+        _load_gemma4_weights(model, model_path, dtype=dtype)
+        return
 
-    index_data = json.loads(index_path.read_text())
-    weight_map: dict[str, str] = index_data["weight_map"]
+    weight_map: dict[str, str] = _load_weight_map(root)
     model_prefix, lm_head_prefix = _detect_weight_prefixes(weight_map)
     packed = _uses_packed_projections(model)
 

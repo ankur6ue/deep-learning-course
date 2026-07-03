@@ -18,12 +18,18 @@ q_proj, k_proj, v_proj
 
 Those are packed in `v5`, not here. Keeping them separate makes `v4` about one idea: replacing gathered SDPA with a paged FlashAttention backend.
 
+`v4` deliberately does not optimize the general K/V cache write path yet.
+Decode gets a simple one-dimensional slot map, but the copy still uses PyTorch
+`index_copy_`. Prefill still writes request by request through
+`write_batch()` -> `write_tokens()`.
+
 ## What Changed From v3
 
 - `attention_backends.py` now exposes only `FlashAttentionPagedBackend`.
 - The backend writes the current K/V chunk into the paged cache before attention.
 - It flattens valid query rows and calls `flash_attn_varlen_func` with `cu_seqlens_q`, `key_lens`, and `block_tables_i32`.
-- Decode batches build `decode_slot_mapping` so one-token K/V writes can go directly to physical cache slots.
+- Decode batches build `decode_slot_mapping` so one-token K/V writes can go directly to physical cache slots, using PyTorch `index_copy_`.
+- Prefill still uses the older general writer: `write_batch()` loops over requests and calls `write_tokens()` for each prompt chunk.
 - `model.py` still uses separate Q/K/V projections and separate gate/up MLP projections.
 
 ## Attention Flow
@@ -33,6 +39,8 @@ Q, new K/V, paged cache, block table, lengths
         |
         v
 write new K/V into paged cache
+  decode: direct slot map + PyTorch index_copy_
+  prefill: request/chunk writer
         |
         v
 FlashAttention reads old + new K/V through block_table
@@ -223,7 +231,7 @@ Edge cases:
 
 - If `cached_seq_len` lands exactly on a block boundary, such as `32` with `block_size = 16`, the write goes to offset `0` of the next logical block.
 - The scheduler must allocate enough blocks before decode runs. If the request has no physical block for `logical_block`, that is a scheduler/allocation bug.
-- `decode_slot_mapping` is only valid for decode. Prefill may write multiple query tokens per request, so `v4` still uses the general `write_batch()` path for prefill.
+- `decode_slot_mapping` is only valid for decode. Prefill may write multiple query tokens per request, so `v4` still uses the general `write_batch()` -> `write_tokens()` path for prefill.
 
 ## Why No `prefill_slot_mapping` Yet?
 
@@ -251,11 +259,11 @@ prefill_slot_mapping = torch.tensor([
 ])
 ```
 
-That is useful, but it is a separate optimization. `v4` intentionally avoids it so this step stays focused on the attention backend change. `v5` introduces the prefill slot mapping together with the other local model-body/cache-write optimizations.
+That is useful, but it is a separate optimization. `v4` intentionally avoids it so this step stays focused on the attention backend change. `v5` introduces the prefill slot mapping and also routes slot-mapped K/V copies through a Triton cache-write kernel when available.
 
 ## Next Version
 
-`v5` keeps FlashAttention and optimizes the transformer body around it: packed QKV projection, packed gate/up projection, cached RoPE, fused local kernels, and prefill slot-mapped K/V writes.
+`v5` keeps FlashAttention and optimizes the transformer body around it: packed QKV projection, packed gate/up projection, cached RoPE, fused local kernels, precomputed prefill slot mappings, and Triton slot-mapped K/V writes.
 
 ## Validation
 

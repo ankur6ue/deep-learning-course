@@ -444,8 +444,7 @@ def triton_apply_rope_from_cache(
     if flat_positions.numel() != x_2d.shape[0]:
         return None
 
-    cache = cos_sin_cache.to(device=x_2d.device, dtype=x_2d.dtype)
-    rotary_dim = cache.shape[-1]
+    rotary_dim = cos_sin_cache.shape[-1]
     if rotary_dim <= 0 or rotary_dim > head_dim or rotary_dim % 2 != 0:
         return None
 
@@ -461,7 +460,7 @@ def triton_apply_rope_from_cache(
         x_2d,
         out,
         flat_positions,
-        cache,
+        cos_sin_cache,
         x_2d.stride(0),
         out.stride(0),
         head_dim,
@@ -796,49 +795,6 @@ def apply_rope(
     cos = cos.view(*positions.shape, 1, -1).to(dtype=x.dtype)
     sin = sin.view(*positions.shape, 1, -1).to(dtype=x.dtype)
     return (x * cos) + (rotate_half(x) * sin)
-
-
-def causal_attn_mask(query_len: int, key_len: int, past_len: int, device: torch.device) -> torch.Tensor:
-    """Build an additive causal mask for one request.
-
-    Args:
-        query_len: Number of query tokens in the current step.
-        key_len: Total visible KV tokens, including cached prefix plus current
-            chunk.
-        past_len: Number of cached prefix tokens already in the KV cache.
-        device: Target device for the mask tensor.
-    """
-    # Query token i in the current chunk can see all past tokens and query tokens <= i.
-    q_idx = torch.arange(query_len, device=device).unsqueeze(1)
-    k_idx = torch.arange(key_len, device=device).unsqueeze(0)
-    allowed = k_idx <= (past_len + q_idx)
-    mask = torch.full((query_len, key_len), float("-inf"), device=device)
-    mask = mask.masked_fill(allowed, 0.0)
-    return mask
-
-
-def sdpa_attention(
-    q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    past_len: int,
-) -> torch.Tensor:
-    """Run scaled dot-product attention for one request.
-
-    Args:
-        q: Query tensor shaped `[Tq, Hq, D]`.
-        k: Key tensor shaped `[Tk, Hq, D]`.
-        v: Value tensor shaped `[Tk, Hq, D]`.
-        past_len: Number of cached tokens that existed before the current query
-            chunk.
-    """
-    # q: [Tq, Hq, D], k/v: [Tk, Hq, D]
-    q_b = q.transpose(0, 1).unsqueeze(0)
-    k_b = k.transpose(0, 1).unsqueeze(0)
-    v_b = v.transpose(0, 1).unsqueeze(0)
-    mask = causal_attn_mask(q.shape[0], k.shape[0], past_len, q.device).to(dtype=q.dtype)
-    out = F.scaled_dot_product_attention(q_b, k_b, v_b, attn_mask=mask, dropout_p=0.0)
-    return out.squeeze(0).transpose(0, 1)
 
 
 def build_cu_seqlens(lengths: torch.Tensor) -> torch.Tensor:

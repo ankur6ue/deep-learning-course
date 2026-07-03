@@ -16,20 +16,6 @@ class PrefixLookup:
     cached_tokens: int
 
 
-@dataclass
-class PagedBatchView:
-    """Dense teaching view built from a paged KV cache.
-
-    Optimized attention backends consume `block_tables` directly. The reference
-    dense paths use this object to show the equivalent padded K/V tensors.
-    """
-
-    block_tables: torch.Tensor
-    seq_lens: torch.Tensor
-    k: torch.Tensor
-    v: torch.Tensor
-
-
 class FullBlockPrefixCache:
     """Tiny full-block prefix cache.
 
@@ -207,49 +193,7 @@ class PagedKVCache:
             if self.refcounts[block_id] == 0:
                 self.free_block_ids.append(block_id)
 
-    def write_tokens(
-        self,
-        layer_idx: int,
-        block_ids: list[int],
-        start_token: int,
-        k_tokens: torch.Tensor,
-        v_tokens: torch.Tensor,
-    ) -> None:
-        """Append a logical token slice into paged KV storage.
-
-        Args:
-            layer_idx: Transformer layer being written.
-            block_ids: Request-local block table. `block_ids[0]` stores logical
-                tokens `0..block_size-1`, `block_ids[1]` stores the next block,
-                and so on.
-            start_token: Logical token index where this write begins. For
-                decode, this is usually the current cached sequence length.
-            k_tokens: New keys shaped `[Tnew, Hkv, D]`.
-            v_tokens: New values shaped `[Tnew, Hkv, D]`.
-        """
-        remaining = k_tokens.shape[0]
-        src_offset = 0
-        token_index = start_token
-
-        # The source chunk is contiguous in logical token order, so we can copy
-        # one contiguous slice per touched page rather than writing token by
-        # token. This keeps the paged-cache mapping explicit while making the
-        # hot path closer to how a real serving engine would batch KV writes.
-        while remaining > 0:
-            logical_block, block_offset = divmod(token_index, self.block_size)
-            tokens_in_block = min(remaining, self.block_size - block_offset)
-            block_id = block_ids[logical_block]
-
-            src_slice = slice(src_offset, src_offset + tokens_in_block)
-            dst_slice = slice(block_offset, block_offset + tokens_in_block)
-            self.k_layers[layer_idx][block_id, dst_slice].copy_(k_tokens[src_slice])
-            self.v_layers[layer_idx][block_id, dst_slice].copy_(v_tokens[src_slice])
-
-            remaining -= tokens_in_block
-            src_offset += tokens_in_block
-            token_index += tokens_in_block
-
-    def write_slot_mapping(
+    def write_kv_to_mapped_slots(
         self,
         layer_idx: int,
         slot_mapping: torch.Tensor,
@@ -258,18 +202,35 @@ class PagedKVCache:
         *,
         assume_all_valid: bool = False,
     ) -> None:
-        """Write a padded batch of K/V tokens using physical slot ids.
+        """Write K/V vectors to cache locations described by physical slot ids.
+
+        `slot_mapping` is an input routing table, not something this method
+        mutates. Each valid entry is a flattened physical KV-cache slot for the
+        corresponding K/V row; padded query/decode positions must contain `-1`.
 
         Args:
             layer_idx: Transformer layer being written.
             slot_mapping: Physical cache slots shaped like `k_tokens[..., 0, 0]`.
-                Invalid padded query positions must contain `-1`.
+                Decode may pass a one-dimensional `[B]` mapping for `[B, 1, H, D]`.
             k_tokens: New keys shaped `[B, T, Hkv, D]`.
             v_tokens: New values shaped `[B, T, Hkv, D]`.
         """
         flat_slots = slot_mapping.reshape(-1)
         k_flat_all = k_tokens.reshape(-1, k_tokens.shape[-2], k_tokens.shape[-1])
         v_flat_all = v_tokens.reshape(-1, v_tokens.shape[-2], v_tokens.shape[-1])
+        # The Triton cache-write kernel masks slot == -1 itself. Trying the full
+        # shape first keeps decode CUDA graph writes shape-stable; only the
+        # PyTorch fallback compacts invalid padded rows.
+        if triton_reshape_and_cache_flash(
+            k_flat_all,
+            v_flat_all,
+            self.k_layers[layer_idx],
+            self.v_layers[layer_idx],
+            flat_slots,
+            self.k_scale,
+            self.v_scale,
+        ):
+            return
         if assume_all_valid:
             slots = flat_slots.to(dtype=torch.long)
             k_flat = k_flat_all
@@ -281,68 +242,25 @@ class PagedKVCache:
             v_flat = v_flat_all[valid]
         if slots.numel() == 0:
             return
-        if triton_reshape_and_cache_flash(
-            k_flat,
-            v_flat,
-            self.k_layers[layer_idx],
-            self.v_layers[layer_idx],
-            slots,
-            self.k_scale,
-            self.v_scale,
-        ):
-            return
         k_cache = self.k_layers[layer_idx].view(-1, k_tokens.shape[-2], k_tokens.shape[-1])
         v_cache = self.v_layers[layer_idx].view(-1, v_tokens.shape[-2], v_tokens.shape[-1])
         k_cache.index_copy_(0, slots, k_flat)
         v_cache.index_copy_(0, slots, v_flat)
-
-    def gather_tokens(
-        self,
-        layer_idx: int,
-        block_ids: list[int],
-        seq_len: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Gather one request's paged KV cache into a dense token-major view.
-
-        Args:
-            layer_idx: Transformer layer to read.
-            block_ids: Request-local block table.
-            seq_len: Number of valid logical tokens to gather. `block_ids` may
-                have spare capacity beyond this length.
-        """
-        if seq_len == 0:
-            device = self.k_layers[layer_idx].device
-            h = self.model_config.num_key_value_heads
-            d = self.model_config.head_dim
-            empty = torch.empty((0, h, d), device=device, dtype=self.k_layers[layer_idx].dtype)
-            return empty, empty
-
-        blocks_needed = self.blocks_needed(seq_len)
-        block_tensor = torch.tensor(block_ids[:blocks_needed], device=self.k_layers[layer_idx].device, dtype=torch.long)
-        k_pages = self.k_layers[layer_idx].index_select(0, block_tensor)
-        v_pages = self.v_layers[layer_idx].index_select(0, block_tensor)
-        k = k_pages.reshape(blocks_needed * self.block_size, *k_pages.shape[2:])[:seq_len]
-        v = v_pages.reshape(blocks_needed * self.block_size, *v_pages.shape[2:])[:seq_len]
-        return k, v
 
     def block_tables_tensor(
         self,
         block_id_lists: list[list[int]],
         seq_lens: list[int],
     ) -> torch.Tensor:
-        """Materialize a padded batched block table.
+        """Materialize the padded block table consumed by paged attention.
 
-        Args:
-            block_id_lists: One logical block table per request.
-            seq_lens: Valid logical token lengths for those requests. This is
-                used to decide how many entries in each block table row are
-                meaningful.
+        This is metadata for the fast paged attention path, not a dense K/V
+        fallback. Each row maps a request's logical blocks to physical cache
+        blocks.
         """
         device = self.k_layers[0].device
         if not block_id_lists:
             return torch.empty((0, 0), device=device, dtype=torch.long)
-        # Pad to the longest logical sequence in the batch. Each row is one
-        # request's logical block table.
         max_blocks = max((self.blocks_needed(seq_len) for seq_len in seq_lens), default=0)
         block_tables = torch.full(
             (len(block_id_lists), max_blocks),
@@ -360,176 +278,3 @@ class PagedKVCache:
                 dtype=torch.long,
             )
         return block_tables
-
-    def gather_batch(
-        self,
-        layer_idx: int,
-        block_id_lists: list[list[int]],
-        seq_lens: list[int],
-    ) -> PagedBatchView:
-        """Gather multiple requests' paged KV into one padded dense batch.
-
-        Args:
-            layer_idx: Transformer layer to read.
-            block_id_lists: One block table per request.
-            seq_lens: Valid cached-token length per request. Example: if three
-                requests have cached prefix lengths `[5, 12, 0]`, the output is
-                padded to length 12 and only those prefix lengths are valid.
-        """
-        device = self.k_layers[layer_idx].device
-        dtype = self.k_layers[layer_idx].dtype
-        seq_lens_tensor = torch.tensor(seq_lens, device=device, dtype=torch.long)
-        if not block_id_lists:
-            h = self.model_config.num_key_value_heads
-            d = self.model_config.head_dim
-            empty = torch.empty((0, 0, h, d), device=device, dtype=dtype)
-            return PagedBatchView(
-                block_tables=torch.empty((0, 0), device=device, dtype=torch.long),
-                seq_lens=seq_lens_tensor,
-                k=empty,
-                v=empty,
-            )
-
-        max_seq_len = max(seq_lens, default=0)
-        h = self.model_config.num_key_value_heads
-        d = self.model_config.head_dim
-        # Gather the paged cache into one padded dense view for the whole batch.
-        # A production paged-attention kernel would usually consume the block
-        # table directly instead of materializing this dense tensor.
-        k_batch = torch.zeros((len(block_id_lists), max_seq_len, h, d), device=device, dtype=dtype)
-        v_batch = torch.zeros((len(block_id_lists), max_seq_len, h, d), device=device, dtype=dtype)
-        block_tables = self.block_tables_tensor(block_id_lists, seq_lens)
-
-        for req_idx, seq_len in enumerate(seq_lens):
-            if seq_len == 0:
-                continue
-            blocks_needed = self.blocks_needed(seq_len)
-            block_ids = block_tables[req_idx, :blocks_needed]
-            # `block_ids` may be non-contiguous physical pages. The block table
-            # is the indirection that maps this request's logical sequence onto
-            # those scattered cache pages.
-            k_pages = self.k_layers[layer_idx].index_select(0, block_ids)
-            v_pages = self.v_layers[layer_idx].index_select(0, block_ids)
-            k_batch[req_idx, :seq_len].copy_(
-                k_pages.reshape(blocks_needed * self.block_size, h, d)[:seq_len]
-            )
-            v_batch[req_idx, :seq_len].copy_(
-                v_pages.reshape(blocks_needed * self.block_size, h, d)[:seq_len]
-            )
-
-        return PagedBatchView(
-            block_tables=block_tables,
-            seq_lens=seq_lens_tensor,
-            k=k_batch,
-            v=v_batch,
-        )
-
-    def build_full_kv_batch(
-        self,
-        layer_idx: int,
-        block_id_lists: list[list[int]],
-        past_lens: list[int],
-        query_lens: list[int],
-        k_new: torch.Tensor,
-        v_new: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Materialize `[past | current chunk | pad]` directly in KV-head space.
-
-        This avoids building a separate padded past tensor and then copying it
-        again into a second `[past | current chunk]` tensor.
-        """
-        device = self.k_layers[layer_idx].device
-        dtype = self.k_layers[layer_idx].dtype
-        batch_size = len(block_id_lists)
-        max_key_len = max((past + query for past, query in zip(past_lens, query_lens, strict=True)), default=0)
-        h = self.model_config.num_key_value_heads
-        d = self.model_config.head_dim
-        k_full = torch.zeros((batch_size, max_key_len, h, d), device=device, dtype=dtype)
-        v_full = torch.zeros((batch_size, max_key_len, h, d), device=device, dtype=dtype)
-
-        for req_idx, (block_ids, past_len, query_len) in enumerate(
-            zip(block_id_lists, past_lens, query_lens, strict=True)
-        ):
-            if past_len > 0:
-                blocks_needed = self.blocks_needed(past_len)
-                block_tensor = torch.tensor(block_ids[:blocks_needed], device=device, dtype=torch.long)
-                k_pages = self.k_layers[layer_idx].index_select(0, block_tensor)
-                v_pages = self.v_layers[layer_idx].index_select(0, block_tensor)
-                k_full[req_idx, :past_len].copy_(
-                    k_pages.reshape(blocks_needed * self.block_size, h, d)[:past_len]
-                )
-                v_full[req_idx, :past_len].copy_(
-                    v_pages.reshape(blocks_needed * self.block_size, h, d)[:past_len]
-                )
-            if query_len > 0:
-                k_full[req_idx, past_len : past_len + query_len].copy_(k_new[req_idx, :query_len])
-                v_full[req_idx, past_len : past_len + query_len].copy_(v_new[req_idx, :query_len])
-        return k_full, v_full
-
-    def write_batch(
-        self,
-        layer_idx: int,
-        block_id_lists: list[list[int]],
-        start_tokens: list[int],
-        valid_lengths: list[int],
-        k_tokens: torch.Tensor,
-        v_tokens: torch.Tensor,
-    ) -> None:
-        """Write a batched chunk into paged KV, request by request.
-
-        Args:
-            layer_idx: Transformer layer being updated.
-            block_id_lists: One block table per request.
-            start_tokens: Logical starting token index for each request's write.
-                During decode this is usually the cached sequence length; during
-                chunked prefill it is the prompt tokens already computed.
-            valid_lengths: Number of valid tokens from each row of `k_tokens`
-                and `v_tokens`. Rows may be padded to a common length.
-            k_tokens: Batched keys `[B, Tpad, Hkv, D]`.
-            v_tokens: Batched values `[B, Tpad, Hkv, D]`.
-        """
-        for req_idx, (block_ids, start_token, valid_len) in enumerate(
-            zip(block_id_lists, start_tokens, valid_lengths, strict=True)
-        ):
-            if valid_len == 0:
-                continue
-            # `start_token` says where this chunk begins in the logical
-            # sequence, so writes land in the correct page and page offset.
-            self.write_tokens(
-                layer_idx=layer_idx,
-                block_ids=block_ids,
-                start_token=start_token,
-                k_tokens=k_tokens[req_idx, :valid_len],
-                v_tokens=v_tokens[req_idx, :valid_len],
-            )
-
-    def write_decode_slots(
-        self,
-        layer_idx: int,
-        slot_mapping: torch.Tensor,
-        k_tokens: torch.Tensor,
-        v_tokens: torch.Tensor,
-    ) -> None:
-        """Write one decode token per batch row using flattened KV slots.
-
-        Args:
-            layer_idx: Transformer layer being updated.
-            slot_mapping: Flattened physical slots shaped `[B]`, where each slot
-                is `physical_block_id * block_size + block_offset`.
-            k_tokens: Decode keys shaped `[B, 1, Hkv, D]`.
-            v_tokens: Decode values shaped `[B, 1, Hkv, D]`.
-        """
-        if triton_reshape_and_cache_flash(
-            k_tokens[:, 0],
-            v_tokens[:, 0],
-            self.k_layers[layer_idx],
-            self.v_layers[layer_idx],
-            slot_mapping,
-            self.k_scale,
-            self.v_scale,
-        ):
-            return
-        flat_k = self.k_layers[layer_idx].view(-1, self.model_config.num_key_value_heads, self.model_config.head_dim)
-        flat_v = self.v_layers[layer_idx].view(-1, self.model_config.num_key_value_heads, self.model_config.head_dim)
-        flat_k.index_copy_(0, slot_mapping, k_tokens[:, 0])
-        flat_v.index_copy_(0, slot_mapping, v_tokens[:, 0])

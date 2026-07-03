@@ -1,8 +1,11 @@
 # Simple vLLM-Style Engine Teaching Sequence
 
-This directory is organized as a clean 8-step teaching progression. The old exploratory versions live in `legacy_experiments/`; the active `v1`-`v8` folders should tell one coherent story.
+This directory is organized as a clean 10-step teaching progression. The old exploratory versions live in `legacy_experiments/`; the active `v1`-`v10` folders should tell one coherent story.
 
-The toy engine should not depend on vLLM runtime kernels or vLLM model code. Production vLLM remains useful as an external benchmark in `vllm_baseline/`.
+The toy engine does not use vLLM model code. Later versions intentionally call
+vLLM-provided attention/runtime kernels in a few places so the course can focus
+on scheduler, metadata, KV-cache, and model-body mechanics. Production vLLM
+remains useful as an external benchmark in `vllm_baseline/`.
 
 ## Version Map
 
@@ -11,11 +14,13 @@ The toy engine should not depend on vLLM runtime kernels or vLLM model code. Pro
 | `v1` | Serving control plane | Requests, scheduler, chunked prefill, decode, and paged KV cache. |
 | `v2` | Direct paged reference attention | Walk paged KV blocks directly; slow, explicit, and useful for understanding block tables. |
 | `v3` | Gathered SDPA attention | Gather paged K/V into dense `[past | current]` tensors and call PyTorch SDPA. |
-| `v4` | Paged FlashAttention backend | FlashAttention reads paged K/V through block tables; introduces `cu_seqlens_q`, `valid_query_rows`, and `decode_slot_mapping`. |
-| `v5` | Local model-body kernels | Packed QKV, packed gate/up, cached RoPE, fused local kernels, and prefill slot-mapped K/V writes. |
+| `v4` | Paged FlashAttention backend | FlashAttention reads paged K/V through block tables; decode gets `decode_slot_mapping`, while cache writes still use PyTorch paths. |
+| `v5` | Local model-body kernels | Packed QKV, packed gate/up, cached RoPE, fused local kernels, precomputed prefill slot mappings, and Triton K/V cache writes. |
 | `v6` | `torch.compile` model body | Compile selected pure tensor regions while keeping attention and KV mutation explicit. |
 | `v7` | Async GPU/CPU control plane | Keep next decode tokens on GPU and copy CPU-visible output asynchronously. |
-| `v8` | Decode CUDA graphs | Fixed-shape decode buckets, static workspaces, scratch rows, and graph replay. |
+| `v8` | CUDA graphs | Fixed-shape decode buckets, all-valid prefill buckets, static workspaces, scratch rows, and graph replay. |
+| `v9` | GPU-resident decode metadata | Keep request block tables on GPU and gather active metadata rows with Triton. |
+| `v10` | Architecture adapters for Gemma 4 | Keep the serving engine explicit while adding Gemma 4 text layer shapes, norms, RoPE, and Triton paged attention. |
 
 ## Shared Test Assets
 
@@ -24,6 +29,7 @@ The toy engine should not depend on vLLM runtime kernels or vLLM model code. Pro
 - `vllm_baseline/`: external production-vLLM timing harness.
 - `common/`: shared loader, tokenizer, benchmark, and utility code used by multiple versions.
 - `legacy_experiments/`: preserved old implementation history.
+- `GEMMA_V10_WORKLOG.md`: durable notes for the Gemma 4 validation work.
 
 ## Current Short Benchmark Snapshot
 

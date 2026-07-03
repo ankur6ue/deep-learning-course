@@ -23,6 +23,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workload-path", type=Path, default=DEFAULT_WORKLOAD_PATH)
     parser.add_argument("--max-new-tokens", type=int, default=32)
     parser.add_argument("--dtype", type=str, default="bfloat16")
+    parser.add_argument(
+        "--tokenizer-mode",
+        type=str,
+        default="auto",
+        help="Forwarded to vLLM. Use 'hf' for local text-only Mistral compatibility checkpoints.",
+    )
     parser.add_argument("--max-model-len", type=int, default=4096)
     parser.add_argument(
         "--max-num-batched-tokens",
@@ -121,6 +127,24 @@ def main() -> None:
     args = parse_args()
     load_t0 = time.perf_counter()
     try:
+        # Some local Mistral text-only compatibility checkpoints use
+        # Transformers' MistralCommonBackend, which behaves like a slow tokenizer
+        # but does not expose every tokenizer method that vLLM checks.
+        import transformers.tokenization_mistral_common as mistral_tokenization
+
+        backend_classes = [
+            getattr(mistral_tokenization, name)
+            for name in dir(mistral_tokenization)
+            if name.endswith("Backend")
+        ]
+        for backend_cls in backend_classes:
+            if not hasattr(backend_cls, "is_fast"):
+                backend_cls.is_fast = property(lambda self: False)  # type: ignore[attr-defined]
+            if not hasattr(backend_cls, "get_added_vocab"):
+                backend_cls.get_added_vocab = lambda self: {}  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    try:
         tokenizer = AutoTokenizer.from_pretrained(args.model_path, fix_mistral_regex=True)
     except TypeError:
         tokenizer = AutoTokenizer.from_pretrained(args.model_path)
@@ -140,6 +164,7 @@ def main() -> None:
     llm_kwargs = {
         "model": args.model_path,
         "dtype": args.dtype,
+        "tokenizer_mode": args.tokenizer_mode,
         "max_model_len": args.max_model_len,
         "tensor_parallel_size": args.tensor_parallel_size,
         "gpu_memory_utilization": args.gpu_memory_utilization,
@@ -190,15 +215,17 @@ def main() -> None:
         raise ValueError("num-runs must be at least 1")
 
     outputs = None
+    outputs_by_run = []
     run_summaries = []
     for run_idx in range(args.num_runs):
         if args.reset_prefix_cache_between_runs:
             llm.reset_prefix_cache()
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and torch.cuda.is_initialized():
             torch.cuda.synchronize()
         run_t0 = time.perf_counter()
         outputs = llm.generate(prompts, sampling_params, use_tqdm=False)
-        if torch.cuda.is_available():
+        outputs_by_run.append(outputs)
+        if torch.cuda.is_available() and torch.cuda.is_initialized():
             torch.cuda.synchronize()
         run_t1 = time.perf_counter()
 
@@ -240,20 +267,28 @@ def main() -> None:
 
     if args.output_json is not None:
         args.output_json.parent.mkdir(parents=True, exist_ok=True)
-        results = []
-        for idx, output in enumerate(outputs):
-            item = workload[idx]
-            request_id = str(item.get("request_id", f"req-{idx}"))
-            generated = output.outputs[0]
-            results.append(
-                {
-                    "request_id": request_id,
-                    "prompt_tokens": len(prompt_ids[idx]),
-                    "generated_ids": list(generated.token_ids),
-                    "finish_reason": generated.finish_reason,
-                    "text": generated.text,
-                }
-            )
+        def serialize_results(run_outputs):
+            results = []
+            for idx, output in enumerate(run_outputs):
+                item = workload[idx]
+                request_id = str(item.get("request_id", f"req-{idx}"))
+                generated = output.outputs[0]
+                results.append(
+                    {
+                        "request_id": request_id,
+                        "prompt_tokens": len(prompt_ids[idx]),
+                        "generated_ids": list(generated.token_ids),
+                        "finish_reason": generated.finish_reason,
+                        "text": generated.text,
+                    }
+                )
+            return results
+
+        results = serialize_results(outputs)
+        results_by_run = [
+            {"run": run_idx + 1, "results": serialize_results(run_outputs)}
+            for run_idx, run_outputs in enumerate(outputs_by_run)
+        ]
         args.output_json.write_text(
             json.dumps(
                 {
@@ -275,6 +310,7 @@ def main() -> None:
                         "seed": args.seed,
                     },
                     "runs": run_summaries,
+                    "results_by_run": results_by_run,
                     "results": results,
                 },
                 indent=2,

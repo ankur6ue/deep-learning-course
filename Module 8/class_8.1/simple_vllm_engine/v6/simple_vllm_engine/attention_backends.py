@@ -51,13 +51,25 @@ def _flash_attn_load_error() -> str | None:
     return _FLASH_ATTN_LOAD_ERROR
 
 
+def _require_flash_attn_available() -> None:
+    flash_attn_varlen_func, get_flash_attn_version = _load_flash_attn()
+    if flash_attn_varlen_func is None or get_flash_attn_version is None:
+        raise RuntimeError(
+            "FlashAttention backend requested, but vLLM FlashAttention bindings "
+            "could not be imported. From v5 onward this teaching engine does not "
+            "fall back to the old SDPA attention path. Install and run with vLLM "
+            "FlashAttention available, or use v10 triton_paged for Gemma 4. "
+            f"Original import error: {_flash_attn_load_error()}"
+        )
+
+
 class AttentionBackend(Protocol):
     """Attention backend contract used from v4 onward.
 
-    The model supplies Q plus the current K/V chunk. The backend is responsible
-    for writing that current K/V into the paged cache before reading attention
-    from the cache. Returning `wrote_kv=True` tells the model loop not to write
-    K/V a second time.
+    The model supplies Q plus the current K/V chunk. From v5 onward, the
+    backend writes that current K/V into the paged cache before reading
+    attention from the cache. The model body does not keep a slow dense-write
+    fallback.
     """
 
     def forward(
@@ -82,7 +94,7 @@ class AttentionBackend(Protocol):
         decode_slot_mapping: torch.Tensor | None = None,
         prefill_slot_mapping: torch.Tensor | None = None,
         prefill_slot_mapping_all_valid: bool = False,
-    ) -> tuple[torch.Tensor, bool]: ...
+    ) -> torch.Tensor: ...
 
 
 @dataclass
@@ -141,7 +153,7 @@ class FlashAttentionPagedBackend:
         prefill_slot_mapping_all_valid: bool,
     ) -> None:
         if decode_slot_mapping is not None:
-            kv_cache.write_decode_slots(
+            kv_cache.write_kv_to_mapped_slots(
                 layer_idx=layer_idx,
                 slot_mapping=decode_slot_mapping,
                 k_tokens=k_new,
@@ -149,8 +161,8 @@ class FlashAttentionPagedBackend:
             )
             return
 
-        if prefill_slot_mapping is not None and hasattr(kv_cache, "write_slot_mapping"):
-            kv_cache.write_slot_mapping(
+        if prefill_slot_mapping is not None:
+            kv_cache.write_kv_to_mapped_slots(
                 layer_idx=layer_idx,
                 slot_mapping=prefill_slot_mapping,
                 k_tokens=k_new,
@@ -159,16 +171,7 @@ class FlashAttentionPagedBackend:
             )
             return
 
-        if not block_id_lists:
-            raise RuntimeError("FlashAttention K/V write needs either slot_mapping or block_id_lists")
-        kv_cache.write_batch(
-            layer_idx=layer_idx,
-            block_id_lists=block_id_lists,
-            start_tokens=past_lens.tolist(),
-            valid_lengths=query_lens.tolist(),
-            k_tokens=k_new,
-            v_tokens=v_new,
-        )
+        raise RuntimeError("K/V write needs decode_slot_mapping or prefill_slot_mapping")
 
     def _flatten_queries(
         self,
@@ -208,7 +211,7 @@ class FlashAttentionPagedBackend:
         decode_slot_mapping: torch.Tensor | None = None,
         prefill_slot_mapping: torch.Tensor | None = None,
         prefill_slot_mapping_all_valid: bool = False,
-    ) -> tuple[torch.Tensor, bool]:
+    ) -> torch.Tensor:
         del triton_decode_metadata  # FlashAttention uses the common metadata tensors directly.
 
         flash_attn_varlen_func, _ = _load_flash_attn()
@@ -255,10 +258,10 @@ class FlashAttentionPagedBackend:
             )
 
             if valid_query_rows is None:
-                return out_flat.view_as(q), True
+                return out_flat.view_as(q)
             out = torch.zeros_like(q)
             out[valid_query_rows] = out_flat
-            return out, True
+            return out
 
 
 def build_attention_backend(
@@ -268,5 +271,6 @@ def build_attention_backend(
     profiler: SimpleProfiler | None = None,
 ) -> AttentionBackend:
     if backend_name == "flash_attn_paged":
+        _require_flash_attn_available()
         return FlashAttentionPagedBackend(num_attention_heads=num_attention_heads, profiler=profiler)
     raise ValueError(f"Unknown attention backend: {backend_name}")

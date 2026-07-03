@@ -87,8 +87,12 @@ class PrefillWorker:
                 start = req.prompt_tokens_computed
                 end = start + item.chunk_len
                 chunk_ids = req.prompt_ids[start:end]
-                req.block_ids = self.kv_cache.ensure_capacity(req.block_ids, req.cached_seq_len + item.chunk_len)
+                # Prefill only writes prompt-token K/V. `end` is the number of
+                # prompt tokens that will exist in the cache after this chunk.
+                req.block_ids = self.kv_cache.ensure_capacity(req.block_ids, end)
                 input_ids[idx, : item.chunk_len] = torch.tensor(chunk_ids, device=device, dtype=torch.long)
+                # RoPE positions are absolute within the full prompt, not relative
+                # to this chunk.
                 positions[idx, : item.chunk_len] = torch.arange(start, end, device=device, dtype=torch.long)
                 lengths.append(item.chunk_len)
 

@@ -5,8 +5,8 @@
 The goal of this step is to reduce overhead outside attention without introducing `torch.compile` yet.
 
 ```text
-v4: separate Q/K/V and gate/up projections, readable RoPE, general prefill KV writes
-v5: packed projections, cached RoPE, fused local kernels, slot-mapped prefill KV writes
+v4: separate Q/K/V and gate/up projections, readable RoPE, PyTorch KV writes
+v5: packed projections, cached RoPE, fused local kernels, Triton slot-mapped KV writes
 ```
 
 `torch.compile` starts in `v6`, not here.
@@ -18,11 +18,21 @@ v5: packed projections, cached RoPE, fused local kernels, slot-mapped prefill KV
 - RoPE uses a reusable cos/sin cache instead of rebuilding frequencies each step.
 - A Triton RoPE kernel applies cached RoPE to Q/K when CUDA is available.
 - RMSNorm, fused add+RMSNorm, SwiGLU, and slot-mapped K/V writes use local Triton kernels when available.
+- Prefill now builds `prefill_slot_mapping` once for the scheduler batch, before
+  the layer loop. The same physical-slot map is reused for every layer; only
+  the layer's newly computed K/V values change.
+- Decode and prefill K/V copies both try the Triton cache-write kernel first.
+  `v4` only had a decode slot map and still used PyTorch copies.
+- CUDA operations materialize tensor objects before the GPU has necessarily
+  finished computing them. A deeper tutorial on views, copies, queued kernels,
+  and CPU-read synchronization is here:
+  [`04_materialization_vs_synchronization.py`](../../../tutorials/04_materialization_vs_synchronization.py).
 - The custom RoPE path introduces an important CUDA/Triton concept: Python can
   move on after launching a GPU kernel, while that kernel may still be reading
-  its input tensors. `v5` therefore uses cloned position tensors and a small
-  keepalive list for the tensors passed to the RoPE kernels.
-- Prefill can write K/V through `prefill_slot_mapping` instead of looping through the generic request/chunk writer.
+  its input tensors. Because v5 RoPE and decode workspace updates run on the
+  same CUDA stream, the RoPE path now relies on stream ordering instead of
+  cloning positions or adding extra RoPE lifetime bookkeeping.
+- Prefill writes K/V through `prefill_slot_mapping` instead of looping through the generic request/chunk writer.
 
 ## Packed QKV Projection
 
@@ -195,7 +205,7 @@ k_triton
 The CPU does not wait for those kernels to finish. It continues through the
 model code and may soon schedule the next step.
 
-### Why `flat_positions.clone()`?
+### Why RoPE No Longer Clones `flat_positions`
 
 This helper is used by both prefill and decode.
 
@@ -224,47 +234,43 @@ step 10 positions workspace = [40, 91, 12]
 step 11 positions workspace = [41, 92, 13]
 ```
 
-If a custom kernel from step 10 is still reading the positions buffer when step
-11 overwrites that same buffer, the kernel can read the wrong positions. To make
-the shared RoPE helper safe for the decode case, `v5` always makes a private
-copy before launching the Triton kernel:
+The important detail is the CUDA stream. RoPE kernels and the next decode
+workspace update are both queued on the same stream in the teaching engine:
 
-```python
-flat_positions = positions.reshape(-1).contiguous().clone()
+```text
+step 10 RoPE kernel reads positions
+step 11 workspace update writes positions
 ```
 
-For prefill, this clone is conservative but not primarily about workspace reuse.
-For decode, it means the step 10 RoPE kernel reads the step 10 positions even if
-the decode workspace is later reused for step 11.
-
-### Why `_rope_keepalive`?
-
-Some tensors passed to the kernel are views or short-lived temporaries:
+CUDA preserves ordering within one stream, so the step 11 update cannot run
+before the step 10 RoPE kernel has consumed the old values. Because of that,
+the fast path now passes a contiguous view directly:
 
 ```python
-q_2d = q_flat.reshape(...)
-k_2d = k_flat.reshape(...)
+flat_positions = positions.reshape(-1).contiguous()
 ```
 
-The kernel receives raw device pointers. Keeping Python tensor references makes
-it clear that this storage must stay alive while recently launched kernels may
-still be using it:
+This matches the pattern used by vLLM for RoPE positions: persistent position
+buffers are updated and consumed on the main stream, without cloning for RoPE
+lifetime.
 
-```python
-self._rope_keepalive.extend(
-    (q_2d, k_2d, flat_positions, cos_sin_cache, q_triton, k_triton)
-)
+### Why This Still Matters For Side Streams
+
+The no-clone rule above depends on same-stream ordering. The current v5 RoPE
+path does not need extra lifetime bookkeeping, but the rule changes when work is
+intentionally moved to another CUDA stream.
+
+For example, newer versions use a side stream for async GPU-to-CPU token copies.
+That path must keep the source GPU tensor alive and use stream synchronization
+because the main stream can continue to the next decode step while the copy
+stream is still reading the old token values.
+
+The rule of thumb is:
+
+```text
+Same stream: rely on stream ordering.
+Different streams: use wait_stream/events, record_stream, and keep references.
 ```
-
-This list is not part of the RoPE math. It is a simple teaching-engine lifetime
-guard. After many launches, old entries are removed:
-
-```python
-if len(self._rope_keepalive) > 4096:
-    del self._rope_keepalive[:2048]
-```
-
-By then, those older kernels have completed.
 
 ### Same Stream vs Other Streams
 
@@ -278,15 +284,13 @@ kernel B
 If both are queued on the same stream, `kernel B` will not run before `kernel A`.
 That ordering helps a lot.
 
-But as soon as code uses reusable buffers, custom kernels, CUDA graphs, side
-streams, or non-blocking copies, it is easy to create situations where Python
-state has advanced while GPU work from an earlier step is still in flight.
-The safe mental model is:
+As soon as code uses side streams or non-blocking copies, it is easy to create
+situations where Python state has advanced while GPU work from an earlier step
+is still in flight. The safe mental model is:
 
 ```text
-If a queued GPU operation still needs a tensor, keep that tensor alive.
-If a queued GPU operation needs the old values, do not pass a mutable workspace;
-pass an owned copy.
+If all users of a mutable workspace are ordered on the same stream, reuse is safe.
+If another stream still needs the old values, keep the tensor alive and order the streams.
 ```
 
 Runnable tutorials for this concept live in:
@@ -295,9 +299,54 @@ Runnable tutorials for this concept live in:
 Module 8/class_8.1/tutorials
 ```
 
+The most relevant tutorial for the forward pass materialization question is:
+
+```bash
+python "Module 8/class_8.1/tutorials/04_materialization_vs_synchronization.py"
+```
+
+### Debug Sync Flags
+
+CPU code and GPU execution are asynchronous by default. That is good for
+performance, but it can make lifetime and workspace-reuse bugs difficult to
+debug because Python can advance to later scheduler steps while earlier GPU work
+is still queued.
+
+`v5` therefore includes two opt-in synchronization flags. Both are disabled by
+default:
+
+```bash
+SIMPLE_VLLM_SYNC_AFTER_ROPE=1
+SIMPLE_VLLM_SYNC_AFTER_FORWARD=1
+```
+
+`SIMPLE_VLLM_SYNC_AFTER_ROPE=1` waits immediately after the custom Triton RoPE
+kernels. This is useful when debugging Q/K position ordering issues, but it is
+not required for the normal same-stream RoPE path.
+
+`SIMPLE_VLLM_SYNC_AFTER_FORWARD=1` waits after logits are produced at the end of
+the model forward pass. This is useful when isolating whether an issue occurs
+inside the model body or later in sampling/control-plane code.
+
+These flags should stay off for normal benchmarking because each forced
+synchronization removes useful CPU/GPU overlap and can hide timing behavior that
+the serving engine normally relies on.
+
 ## `prefill_slot_mapping`
 
 `v4` introduced `decode_slot_mapping`, where each request writes exactly one new K/V row. Prefill is different: each request may write several prompt-token rows, and different requests may contribute different chunk lengths.
+
+There are two separate improvements in `v5`:
+
+1. The physical destination slots for prefill are computed once before the
+   transformer layer loop, instead of rediscovering the destination page and
+   page offset while writing each layer's K/V.
+2. The actual K/V copy uses `triton_reshape_and_cache_flash()` when CUDA inputs
+   are compatible, instead of relying on Python loops plus PyTorch slice copies.
+
+The attention kernel still does not populate the cache. It expects the current
+layer's K/V cache to already contain both the old tokens and the new tokens for
+this scheduler step.
 
 Example with `block_size = 16`:
 
@@ -330,10 +379,25 @@ prefill_slot_mapping = torch.tensor([
 
 `-1` means: this padded query cell is not a real token, so do not write it to KV cache.
 
+That map is layer-independent. For every transformer layer, the model computes
+that layer's K/V tensors, then the attention backend copies those values into
+the same physical slots:
+
+```text
+build prefill_slot_mapping once for the batch
+
+for each layer:
+    compute layer-specific K/V
+    Triton-copy K/V into cache at prefill_slot_mapping
+    run FlashAttention over the populated paged cache
+```
+
 Edge cases:
 
 - If all requests have the same chunk length, there are no `-1` cells and the write kernel can skip the validity mask.
-- During decode, this structure is not used. Decode stays with the simpler one-dimensional `decode_slot_mapping` from `v4`.
+- During decode, this 2D prefill structure is not used. Decode keeps the
+  simpler one-dimensional `decode_slot_mapping`, but it now goes through the
+  same `write_kv_to_mapped_slots()` helper instead of the old PyTorch writer.
 
 ## Next Version
 

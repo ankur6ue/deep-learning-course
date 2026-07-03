@@ -1,13 +1,17 @@
-# v8: Decode CUDA Graphs
+# v8: Decode and Prefill CUDA Graphs
 
-`v8` keeps the optimized eager path from `v7` and adds fixed-shape decode CUDA graph replay.
+`v8` keeps the optimized eager path from `v7` and adds fixed-shape CUDA graph
+replay for decode plus the simple all-valid prefill case.
 
 ## What Changed From v7
 
 - `DecodeGraphBucket` owns static decode tensors for one decode batch size.
+- `PrefillGraphBucket` owns static prefill tensors for one all-valid prompt
+  chunk shape: batch size, chunk length, and maximum key length.
 - Before replay, Python/Triton mutates those tensors in place with current input ids, positions, sequence lengths, slot mappings, and block tables.
-- The captured graph replays the model decode path with stable tensor addresses.
-- Prefill remains eager because prompt chunk shapes vary.
+- The captured graph replays the model path with stable tensor addresses.
+- Ragged prefill remains eager because prompt chunk shapes vary and require
+  padding masks.
 - `attention_backends.py` still contains only `FlashAttentionPagedBackend`.
 
 ## Graph Bucket Mental Model
@@ -18,6 +22,13 @@ capture bucket size 8 once
         v
 for a real 8-request decode step:
   copy new metadata into static tensors
+  replay graph
+
+capture prefill bucket (batch=2, chunk=64, max_key_len=512) once
+        |
+        v
+for a real all-valid prefill step with that shape:
+  copy new prompt tokens and metadata into static tensors
   replay graph
 ```
 
@@ -55,6 +66,23 @@ new token slots changed?  update slot_mapping
 
 The graph still sees the same tensor objects, so replay is legal.
 
+### `PrefillGraphBucket`
+
+The same address-stability rule applies to prefill. `PrefillGraphBucket` owns
+fixed tensors for one shape:
+
+```text
+input_ids       [batch_size, chunk_len]
+positions       [batch_size, chunk_len]
+query_lens      [batch_size]
+key_lens        [batch_size]
+slot_mapping    [batch_size, chunk_len]
+block_tables    [batch_size, max_blocks]
+```
+
+This bucket is used only when every row has exactly `chunk_len` valid prompt
+tokens. If the batch is ragged, the eager path is clearer and safer.
+
 ### Scratch Rows
 
 If the real batch has fewer requests than the graph bucket size, the unused rows
@@ -85,9 +113,9 @@ Edge cases:
   to eager decode for that step.
 - If a request needs more block-table columns than the bucket was captured with,
   that bucket is invalid for the step and eager decode is safer.
-- Prefill is not captured because prompt chunk sizes vary too much. Capturing
-  highly variable prefill shapes would create many graph buckets and make the
-  teaching implementation harder to follow.
+- Ragged prefill is not captured because prompt chunk sizes vary too much.
+  Capturing highly variable masked prefill shapes would create many graph
+  buckets and make the teaching implementation harder to follow.
 
 ## Validation
 

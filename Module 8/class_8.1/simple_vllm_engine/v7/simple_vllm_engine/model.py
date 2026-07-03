@@ -70,6 +70,8 @@ def _input_norm_qkv_no_residual_tensor_forward(
     """Pure tensor input RMSNorm + QKV projection for the first layer."""
     normed = _rms_norm_tensor_forward(hidden, norm_weight, eps)
     qkv = F.linear(normed.reshape(-1, hidden.shape[-1]), qkv_weight)
+    # Layer 0 has no accumulated residual yet. Returning `hidden` initializes
+    # the residual stream without accidentally adding embeddings to themselves.
     return qkv.view(*hidden.shape[:-1], -1), hidden
 
 
@@ -81,6 +83,9 @@ def _input_norm_qkv_residual_tensor_forward(
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Pure tensor residual add + input RMSNorm + QKV projection."""
+    # `hidden` is the previous layer's MLP branch output. Add it here, directly
+    # next to RMSNorm, so torch.compile can keep the residual add and norm in
+    # one tensor region.
     residual = hidden + residual
     normed = _rms_norm_tensor_forward(residual, norm_weight, eps)
     qkv = F.linear(normed.reshape(-1, hidden.shape[-1]), qkv_weight)
@@ -101,6 +106,8 @@ def _attention_tail_tensor_forward(
         attn_out_heads.reshape(-1, o_weight.shape[1]),
         o_weight,
     ).view(*attn_out_heads.shape[:-2], -1)
+    # Attention's output projection is the second residual branch in a Llama
+    # block. Keep the add adjacent to post-attention RMSNorm for fusion.
     residual = attn_out + residual
     normed = _rms_norm_tensor_forward(residual, post_norm_weight, eps)
     hidden = _mlp_tensor_forward(
@@ -127,6 +134,8 @@ def _attention_tail_masked_tensor_forward(
         o_weight,
     ).view(*attn_out_heads.shape[:-2], -1)
     attn_out = attn_out * mask.unsqueeze(-1)
+    # Same attention residual add as the unmasked tail; the mask only prevents
+    # padded prefill cells from contributing to the carried residual stream.
     residual = attn_out + residual
     normed = _rms_norm_tensor_forward(residual, post_norm_weight, eps)
     hidden = _mlp_tensor_forward(
@@ -161,6 +170,9 @@ class RMSNorm(nn.Module):
         transformer loop easier to compare against production serving code.
         """
         if residual is not None:
+            # Callers keep the branch output (`x`) separate from the residual
+            # stream so this add can be fused with RMSNorm instead of launching
+            # a standalone residual-add kernel.
             fused = triton_fused_add_rms_norm(x, residual, self.weight, self.eps)
             if fused is not None:
                 return fused
@@ -285,10 +297,9 @@ class MiniLlamaLM(nn.Module):
         self._compiled_input_norm_qkv_residual = None
         self._compiled_attention_tail = None
         self._compiled_attention_tail_masked = None
-        self._rope_keepalive: list[torch.Tensor] = []
-        # Forward-level sync is currently a correctness guard for the native
-        # async RoPE path. It prevents mutable decode workspaces from being
-        # reused before custom kernels have consumed their inputs.
+        # Debug guard for RoPE kernel ordering. Normal execution keeps RoPE and
+        # decode workspace updates on the same CUDA stream, so stream ordering is
+        # sufficient and this should stay disabled for benchmarking.
         self._sync_after_rope = os.environ.get("SIMPLE_VLLM_SYNC_AFTER_ROPE") == "1"
         self._sync_after_forward = os.environ.get("SIMPLE_VLLM_SYNC_AFTER_FORWARD", "1") != "0"
 
@@ -364,10 +375,11 @@ class MiniLlamaLM(nn.Module):
         k_shape = k_flat.shape
         q_2d = q_flat.reshape(-1, q_shape[-1])
         k_2d = k_flat.reshape(-1, k_shape[-1])
-        # Decode workspace buffers are reused every scheduler step. Custom
-        # RoPE kernels read positions asynchronously, so take owned storage
-        # instead of a view into a mutable workspace buffer.
-        flat_positions = positions.reshape(-1).contiguous().clone()
+        # RoPE runs on the current CUDA stream. Decode may pass a view into a
+        # reusable positions workspace, but the next workspace update is queued
+        # on the same stream and therefore cannot overwrite values before this
+        # RoPE kernel reads them.
+        flat_positions = positions.reshape(-1).contiguous()
         if flat_positions.numel() != q_2d.shape[0]:
             return None
         try:
@@ -390,14 +402,6 @@ class MiniLlamaLM(nn.Module):
             q_triton = None
             k_triton = None
         if q_triton is not None and k_triton is not None:
-            # The decode path reuses static input/position buffers. CUDA kernel
-            # launches are asynchronous, so keep the source views and cloned
-            # positions alive long enough for the RoPE kernels to read them.
-            self._rope_keepalive.extend(
-                (q_2d, k_2d, flat_positions, cos_sin_cache, q_triton, k_triton)
-            )
-            if len(self._rope_keepalive) > 4096:
-                del self._rope_keepalive[:2048]
             if self._sync_after_rope:
                 torch.cuda.current_stream(q_triton.device).synchronize()
             return q_triton.view(q_shape), k_triton.view(k_shape)
@@ -648,6 +652,9 @@ class MiniLlamaLM(nn.Module):
 
         block_id_lists = block_id_lists or []
 
+        # Llama keeps two values in flight: `hidden` is the newest branch output
+        # and `residual` is the accumulated residual stream. We defer residual
+        # adds until RMSNorm sites so add+norm can use the fused kernel.
         residual = None
         for layer_idx, layer in enumerate(self.layers):
             # 1. Input RMSNorm/residual + QKV projection + RoPE.
@@ -659,6 +666,8 @@ class MiniLlamaLM(nn.Module):
             with self.profiler.section("model.qkv_proj") if self.profiler else nullcontext():
                 if self._compiled_input_norm_qkv_no_residual is not None:
                     if residual is None:
+                        # First layer: initialize residual from embeddings without
+                        # adding embeddings to themselves.
                         qkv, residual = self._compiled_input_norm_qkv_no_residual(
                             hidden,
                             layer.input_norm.weight,
@@ -666,6 +675,8 @@ class MiniLlamaLM(nn.Module):
                             layer.input_norm.eps,
                         )
                     else:
+                        # Later layers: fold the previous MLP output (`hidden`)
+                        # into the residual stream at the input RMSNorm boundary.
                         qkv, residual = self._compiled_input_norm_qkv_residual(
                             hidden,
                             residual,
@@ -676,9 +687,14 @@ class MiniLlamaLM(nn.Module):
                     q, k_new, v_new = self._split_projected_qkv(qkv, positions)
                 else:
                     if residual is None:
+                        # First layer: initialize the residual stream from embeddings.
+                        # There is no previous MLP branch to add yet.
                         residual = hidden
                         normed = layer.input_norm(hidden)
                     else:
+                        # Later layers: `hidden` is the previous layer's MLP output.
+                        # `input_norm` adds it to the residual stream and normalizes in
+                        # one fused add+RMSNorm operation.
                         normed, residual = layer.input_norm(hidden, residual)
                     # `positions` holds absolute token indices, so RoPE still
                     # sees the right offsets during later prefill chunks.
@@ -689,7 +705,7 @@ class MiniLlamaLM(nn.Module):
             # Q plus the newly computed K/V and all metadata needed to read old
             # K/V from the paged cache. Some backends also write the new K/V
             # inside the attention call; others ask us to write it afterward.
-            attn_out_heads, wrote_kv = self.attention_backend.forward(
+            attn_out_heads = self.attention_backend.forward(
                 layer_idx=layer_idx,
                 q=q,
                 k_new=k_new,
@@ -710,32 +726,6 @@ class MiniLlamaLM(nn.Module):
                 prefill_slot_mapping=metadata.prefill_slot_mapping,
                 prefill_slot_mapping_all_valid=metadata.prefill_slot_mapping_all_valid,
             )
-            # After attention consumes the current chunk, append that chunk's
-            # K/V into the paged cache so later decode steps can see it.
-            if not wrote_kv:
-                if metadata.prefill_slot_mapping is not None:
-                    with self.profiler.section("model.kv_write") if self.profiler else nullcontext():
-                        kv_cache.write_slot_mapping(
-                            layer_idx=layer_idx,
-                            slot_mapping=metadata.prefill_slot_mapping,
-                            k_tokens=k_new,
-                            v_tokens=v_new,
-                            assume_all_valid=metadata.prefill_slot_mapping_all_valid,
-                        )
-                elif not block_id_lists:
-                    raise RuntimeError("Dense KV write fallback requires block_id_lists")
-                else:
-                    past_lens = metadata.past_lens.tolist()
-                    query_lens = metadata.query_lens.tolist()
-                    with self.profiler.section("model.kv_write") if self.profiler else nullcontext():
-                        kv_cache.write_batch(
-                            layer_idx=layer_idx,
-                            block_id_lists=block_id_lists,
-                            start_tokens=past_lens,
-                            valid_lengths=query_lens,
-                            k_tokens=k_new,
-                            v_tokens=v_new,
-                        )
 
             if self._compiled_attention_tail is not None:
                 # 3a. Experimental compiled tail.
@@ -778,6 +768,8 @@ class MiniLlamaLM(nn.Module):
                     ).view(attn_out_heads.shape[0], attn_out_heads.shape[1], -1)
                     hidden = attn_out if mask is None else self._masked_residual(attn_out, mask)
                 with self.profiler.section("model.post_attn_norm") if self.profiler else nullcontext():
+                    # Attention output is the other Llama residual branch. Add it
+                    # at post-attention norm so add+RMSNorm stays fused.
                     normed, residual = layer.post_norm(hidden, residual)
                 with self.profiler.section("model.mlp") if self.profiler else nullcontext():
                     if self._compiled_mlp is not None:
@@ -804,6 +796,8 @@ class MiniLlamaLM(nn.Module):
             # Final normalization is applied to every valid token in the step,
             # but logits are only needed for the last token of each request.
             if residual is not None:
+                # Flush the final layer's deferred MLP output into the residual
+                # stream before the final RMSNorm.
                 hidden, _ = self.norm(hidden, residual)
             else:
                 hidden = self.norm(hidden)
@@ -841,6 +835,8 @@ class MiniLlamaLM(nn.Module):
             hidden = self.embed_tokens(input_ids.reshape(-1))
 
         block_id_lists = block_id_lists or []
+        # Same deferred-residual scheme as prefill, but with token-major decode
+        # tensors. Adds are still delayed to RMSNorm boundaries for fusion.
         residual = None
         batch_size = hidden.shape[0]
         for layer_idx, layer in enumerate(self.layers):
@@ -848,6 +844,8 @@ class MiniLlamaLM(nn.Module):
             with self.profiler.section("model.qkv_proj") if self.profiler else nullcontext():
                 if self._compiled_input_norm_qkv_no_residual is not None:
                     if residual is None:
+                        # First layer: initialize residual from embeddings without
+                        # adding embeddings to themselves.
                         qkv, residual = self._compiled_input_norm_qkv_no_residual(
                             hidden,
                             layer.input_norm.weight,
@@ -855,6 +853,8 @@ class MiniLlamaLM(nn.Module):
                             layer.input_norm.eps,
                         )
                     else:
+                        # Later layers: fold the previous MLP output (`hidden`)
+                        # into the residual stream at the input RMSNorm boundary.
                         qkv, residual = self._compiled_input_norm_qkv_residual(
                             hidden,
                             residual,
@@ -865,15 +865,19 @@ class MiniLlamaLM(nn.Module):
                     q, k_new, v_new = self._split_projected_qkv_decode(qkv, positions)
                 else:
                     if residual is None:
+                        # First layer: initialize the residual stream from embeddings.
+                        # There is no previous MLP branch to add yet.
                         residual = hidden
                         normed = layer.input_norm(hidden)
                     else:
+                        # Later layers: add the deferred MLP output and normalize
+                        # in one fused add+RMSNorm call.
                         normed, residual = layer.input_norm(hidden, residual)
                     q, k_new, v_new = self._project_qkv_decode(layer, normed, positions)
 
             # The decode attention backend is expected to write the new K/V
             # directly into the paged cache using `decode_slot_mapping`.
-            attn_out_heads, wrote_kv = self.attention_backend.forward(
+            attn_out_heads = self.attention_backend.forward(
                 layer_idx=layer_idx,
                 q=q.view(batch_size, 1, self.config.num_attention_heads, self.config.head_dim),
                 k_new=k_new.view(batch_size, 1, self.config.num_key_value_heads, self.config.head_dim),
@@ -894,9 +898,6 @@ class MiniLlamaLM(nn.Module):
                 prefill_slot_mapping=None,
                 prefill_slot_mapping_all_valid=False,
             )
-            if not wrote_kv:
-                raise RuntimeError("Decode attention backend must write K/V cache")
-
             if self._compiled_attention_tail is not None:
                 # Experimental compiled post-attention tail. The helper expects
                 # an attention-head-shaped tensor so we restore that view here.
@@ -921,6 +922,8 @@ class MiniLlamaLM(nn.Module):
                         layer.o_proj.weight,
                     )
                 with self.profiler.section("model.post_attn_norm") if self.profiler else nullcontext():
+                    # Add the attention branch at post-attention RMSNorm so the
+                    # residual add can stay fused with the norm.
                     normed, residual = layer.post_norm(hidden, residual)
                 with self.profiler.section("model.mlp") if self.profiler else nullcontext():
                     if self._compiled_mlp is not None:
@@ -939,6 +942,8 @@ class MiniLlamaLM(nn.Module):
 
         with self.profiler.section("model.final_norm_lm_head") if self.profiler else nullcontext():
             if residual is not None:
+                # Flush the final layer's deferred MLP output into the residual
+                # stream before the final RMSNorm.
                 hidden, _ = self.norm(hidden, residual)
             else:
                 hidden = self.norm(hidden)

@@ -15,12 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = "/home/ankur/dev/models/Llama-3.1-8B-Instruct"
 DEFAULT_WORKLOAD_PATH = ROOT / "workloads" / "shared_chat_workload.json"
 DEFAULT_RESULTS_DIR = ROOT / "benchmark_results"
-REAL_MODEL_VERSIONS = [f"v{i}" for i in range(2, 9)]
+REAL_MODEL_VERSIONS = [f"v{i}" for i in range(2, 11)]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Benchmark v2-v8 against the previous version and production vLLM."
+        description="Benchmark v2-v10 against the previous version and production vLLM."
     )
     parser.add_argument("--model-path", type=str, default=DEFAULT_MODEL_PATH)
     parser.add_argument("--workload-path", type=Path, default=DEFAULT_WORKLOAD_PATH)
@@ -33,6 +33,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-prefill-chunk-tokens", type=int, default=64)
     parser.add_argument("--max-decode-batch-size", type=int, default=8)
     parser.add_argument("--max-model-len", type=int, default=4096)
+    parser.add_argument(
+        "--attention-backend",
+        type=str,
+        default=None,
+        help="Optional toy-engine attention backend override, e.g. flash_attn_paged or triton_paged.",
+    )
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument(
         "--honor-arrival-steps",
@@ -50,6 +56,52 @@ def parse_args() -> argparse.Namespace:
         "--vllm-enforce-eager",
         action="store_true",
         help="Disable vLLM graph capture. Default keeps production vLLM graph behavior.",
+    )
+    parser.add_argument(
+        "--vllm-tokenizer-mode",
+        type=str,
+        default="auto",
+        help="Forwarded to vLLM. Use 'hf' for local text-only Mistral compatibility checkpoints.",
+    )
+    parser.add_argument(
+        "--vllm-gpu-memory-utilization",
+        type=float,
+        default=0.85,
+        help="Forwarded to vLLM. Raising this can be necessary for larger local checkpoints.",
+    )
+    parser.add_argument(
+        "--vllm-num-runs",
+        type=int,
+        default=1,
+        help="Number of measured vLLM runs. The summary uses the fastest run.",
+    )
+    parser.add_argument(
+        "--unsafe-decode-cuda-graphs",
+        action="store_true",
+        help=(
+            "Enable toy-engine decode CUDA graph replay and skip replay repair/"
+            "validation. Benchmark-only; can change generated tokens."
+        ),
+    )
+    parser.add_argument(
+        "--enable-decode-cuda-graphs",
+        action="store_true",
+        help=(
+            "Enable toy-engine decode CUDA graph replay with capture-time "
+            "validation when supported by the selected attention backend."
+        ),
+    )
+    parser.add_argument(
+        "--torch-compile-scope",
+        type=str,
+        default=None,
+        choices=["mlp", "input_qkv", "tail", "all"],
+        help="Optional toy-engine torch.compile scope override for versions that expose it.",
+    )
+    parser.add_argument(
+        "--disable-toy-torch-compile",
+        action="store_true",
+        help="Disable the toy engine's model-body torch.compile path when the checkpoint is too memory-constrained.",
     )
     return parser.parse_args()
 
@@ -97,25 +149,33 @@ def run_child(args: argparse.Namespace) -> None:
         )
 
     dtype = torch.bfloat16 if args.device.startswith("cuda") else torch.float32
-    config = _filtered_dataclass_init(
-        EngineConfig,
-        {
-            "block_size": args.block_size,
-            "num_blocks": args.num_blocks,
-            "max_batch_tokens": args.max_batch_tokens,
-            "max_prefill_chunk_tokens": args.max_prefill_chunk_tokens,
-            "max_decode_batch_size": args.max_decode_batch_size,
-            "max_model_len": args.max_model_len,
-            "enable_prefix_cache": False,
-            "device": args.device,
-            "dtype": dtype,
-            "enable_timing": False,
-            "ignore_eos": True,
-            # Older versions do not expose ignore_eos, so force EOS out of range.
-            "eos_token_id": -999,
-            "pad_token_id": 0,
-        },
-    )
+    config_values = {
+        "block_size": args.block_size,
+        "num_blocks": args.num_blocks,
+        "max_batch_tokens": args.max_batch_tokens,
+        "max_prefill_chunk_tokens": args.max_prefill_chunk_tokens,
+        "max_decode_batch_size": args.max_decode_batch_size,
+        "max_model_len": args.max_model_len,
+        "enable_prefix_cache": False,
+        "device": args.device,
+        "dtype": dtype,
+        "enable_timing": False,
+        "enable_decode_cuda_graphs": (
+            args.enable_decode_cuda_graphs or args.unsafe_decode_cuda_graphs
+        ),
+        "unsafe_decode_cuda_graphs": args.unsafe_decode_cuda_graphs,
+        "ignore_eos": True,
+        # Older versions do not expose ignore_eos, so force EOS out of range.
+        "eos_token_id": -999,
+        "pad_token_id": 0,
+    }
+    if args.torch_compile_scope is not None:
+        config_values["torch_compile_scope"] = args.torch_compile_scope
+    if args.disable_toy_torch_compile:
+        config_values["enable_torch_compile_model_body"] = False
+    if args.attention_backend is not None:
+        config_values["attention_backend"] = args.attention_backend
+    config = _filtered_dataclass_init(EngineConfig, config_values)
 
     def run_once() -> tuple[float, list[Any], Any]:
         engine, loaded_tokenizer = build_engine_from_pretrained(args.model_path, config)
@@ -258,6 +318,7 @@ def summarize(results_dir: Path, versions: list[str], include_vllm: bool) -> str
 
 def run_parent(args: argparse.Namespace) -> None:
     args.results_dir = args.results_dir.resolve()
+    args.workload_path = args.workload_path.resolve()
     args.results_dir.mkdir(parents=True, exist_ok=True)
     for version in args.versions:
         out = args.results_dir / f"{version}.json"
@@ -292,8 +353,16 @@ def run_parent(args: argparse.Namespace) -> None:
             "--device",
             args.device,
         ]
+        if args.attention_backend is not None:
+            cmd.extend(["--attention-backend", args.attention_backend])
         if args.honor_arrival_steps:
             cmd.append("--honor-arrival-steps")
+        if args.enable_decode_cuda_graphs:
+            cmd.append("--enable-decode-cuda-graphs")
+        if args.torch_compile_scope is not None:
+            cmd.extend(["--torch-compile-scope", args.torch_compile_scope])
+        if args.disable_toy_torch_compile:
+            cmd.append("--disable-toy-torch-compile")
         subprocess.run(cmd, cwd=ROOT, check=True)
 
     if not args.skip_vllm:
@@ -308,6 +377,8 @@ def run_parent(args: argparse.Namespace) -> None:
             str(args.workload_path),
             "--max-new-tokens",
             str(args.max_new_tokens),
+            "--tokenizer-mode",
+            args.vllm_tokenizer_mode,
             "--max-model-len",
             str(args.max_model_len),
             "--max-num-batched-tokens",
@@ -316,6 +387,10 @@ def run_parent(args: argparse.Namespace) -> None:
             str(args.max_decode_batch_size),
             "--block-size",
             str(args.block_size),
+            "--gpu-memory-utilization",
+            str(args.vllm_gpu_memory_utilization),
+            "--num-runs",
+            str(args.vllm_num_runs),
             "--disable-prefix-caching",
             "--output-json",
             str(vllm_out),

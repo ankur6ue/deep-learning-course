@@ -29,6 +29,8 @@ class RMSNorm(nn.Module):
     def __init__(self, hidden_size: int, eps: float) -> None:
         """Construct RMSNorm over the final hidden dimension."""
         super().__init__()
+        # Initialized as a valid default; the HF checkpoint loader overwrites
+        # this Parameter with the model's learned RMSNorm scale tensor.
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.eps = eps
 
@@ -49,6 +51,9 @@ class RMSNorm(nn.Module):
         transformer loop easier to compare against production serving code.
         """
         if residual is not None:
+            # Callers keep the branch output (`x`) separate from the residual
+            # stream so this add can be fused with RMSNorm instead of launching
+            # a standalone residual-add kernel.
             fused = triton_fused_add_rms_norm(x, residual, self.weight, self.eps)
             if fused is not None:
                 return fused
@@ -165,10 +170,9 @@ class MiniLlamaLM(nn.Module):
         self.register_buffer("rope_cos_sin_cache", rope_cache, persistent=False)
         self.profiler = None
         self.attention_backend = None
-        self._rope_keepalive: list[torch.Tensor] = []
-        # Forward-level sync is currently a correctness guard for the native
-        # async RoPE path. It prevents mutable decode workspaces from being
-        # reused before custom kernels have consumed their inputs.
+        # Debug guard for RoPE kernel ordering. Normal execution keeps RoPE and
+        # decode workspace updates on the same CUDA stream, so stream ordering is
+        # sufficient and this should stay disabled for benchmarking.
         self._sync_after_rope = os.environ.get("SIMPLE_VLLM_SYNC_AFTER_ROPE") == "1"
         # v5 has no static decode workspace or CUDA graph replay yet, so the
         # eager path should not force a synchronization after every forward.
@@ -198,12 +202,11 @@ class MiniLlamaLM(nn.Module):
         k_shape = k_flat.shape
         q_2d = q_flat.reshape(-1, q_shape[-1])
         k_2d = k_flat.reshape(-1, k_shape[-1])
-        # This helper is shared by prefill and decode. Prefill builds a fresh
-        # `positions` tensor for each chunk, but decode passes a view into
-        # `DecodeWorker.positions_workspace`, which is reused every scheduler
-        # step. Custom RoPE kernels read positions asynchronously, so take owned
-        # storage instead of depending on the caller's buffer lifetime.
-        flat_positions = positions.reshape(-1).contiguous().clone()
+        # RoPE runs on the current CUDA stream. Decode may pass a view into a
+        # reusable positions workspace, but the next workspace update is queued
+        # on the same stream and therefore cannot overwrite values before this
+        # RoPE kernel reads them.
+        flat_positions = positions.reshape(-1).contiguous()
         if flat_positions.numel() != q_2d.shape[0]:
             return None
         try:
@@ -226,15 +229,6 @@ class MiniLlamaLM(nn.Module):
             q_triton = None
             k_triton = None
         if q_triton is not None and k_triton is not None:
-            # CUDA kernel launches are asynchronous, so keep the source views
-            # and cloned positions alive long enough for the RoPE kernels to
-            # read them. This matters most in decode, where input/position
-            # workspaces are reused across scheduler steps.
-            self._rope_keepalive.extend(
-                (q_2d, k_2d, flat_positions, cos_sin_cache, q_triton, k_triton)
-            )
-            if len(self._rope_keepalive) > 4096:
-                del self._rope_keepalive[:2048]
             if self._sync_after_rope:
                 torch.cuda.current_stream(q_triton.device).synchronize()
             return q_triton.view(q_shape), k_triton.view(k_shape)
@@ -485,14 +479,22 @@ class MiniLlamaLM(nn.Module):
 
         block_id_lists = block_id_lists or []
 
+        # Llama keeps two values in flight: `hidden` is the newest branch output
+        # and `residual` is the accumulated residual stream. We defer residual
+        # adds until RMSNorm sites so add+norm can use the fused kernel.
         residual = None
         for layer_idx, layer in enumerate(self.layers):
             # 1. Input RMSNorm/residual + QKV projection + RoPE.
             with self.profiler.section("model.qkv_proj") if self.profiler else nullcontext():
                 if residual is None:
+                    # First layer: initialize the residual stream from embeddings.
+                    # There is no previous MLP branch to add yet.
                     residual = hidden
                     normed = layer.input_norm(hidden)
                 else:
+                    # Later layers: `hidden` is the previous layer's MLP output.
+                    # `input_norm` adds it to the residual stream and normalizes in
+                    # one fused add+RMSNorm operation.
                     normed, residual = layer.input_norm(hidden, residual)
                 # `positions` holds absolute token indices, so RoPE still sees
                 # the right offsets during later prefill chunks.
@@ -503,7 +505,7 @@ class MiniLlamaLM(nn.Module):
             # Q plus the newly computed K/V and all metadata needed to read old
             # K/V from the paged cache. Some backends also write the new K/V
             # inside the attention call; others ask us to write it afterward.
-            attn_out_heads, wrote_kv = self.attention_backend.forward(
+            attn_out_heads = self.attention_backend.forward(
                 layer_idx=layer_idx,
                 q=q,
                 k_new=k_new,
@@ -524,32 +526,6 @@ class MiniLlamaLM(nn.Module):
                 prefill_slot_mapping=metadata.prefill_slot_mapping,
                 prefill_slot_mapping_all_valid=metadata.prefill_slot_mapping_all_valid,
             )
-            # After attention consumes the current chunk, append that chunk's
-            # K/V into the paged cache so later decode steps can see it.
-            if not wrote_kv:
-                if metadata.prefill_slot_mapping is not None:
-                    with self.profiler.section("model.kv_write") if self.profiler else nullcontext():
-                        kv_cache.write_slot_mapping(
-                            layer_idx=layer_idx,
-                            slot_mapping=metadata.prefill_slot_mapping,
-                            k_tokens=k_new,
-                            v_tokens=v_new,
-                            assume_all_valid=metadata.prefill_slot_mapping_all_valid,
-                        )
-                elif not block_id_lists:
-                    raise RuntimeError("Dense KV write fallback requires block_id_lists")
-                else:
-                    past_lens = metadata.past_lens.tolist()
-                    query_lens = metadata.query_lens.tolist()
-                    with self.profiler.section("model.kv_write") if self.profiler else nullcontext():
-                        kv_cache.write_batch(
-                            layer_idx=layer_idx,
-                            block_id_lists=block_id_lists,
-                            start_tokens=past_lens,
-                            valid_lengths=query_lens,
-                            k_tokens=k_new,
-                            v_tokens=v_new,
-                        )
 
             # 3. Output projection + post-attention norm + packed SwiGLU MLP.
             with self.profiler.section("model.attn_out_proj") if self.profiler else nullcontext():
@@ -559,6 +535,8 @@ class MiniLlamaLM(nn.Module):
                 ).view(attn_out_heads.shape[0], attn_out_heads.shape[1], -1)
                 hidden = attn_out if mask is None else self._masked_residual(attn_out, mask)
             with self.profiler.section("model.post_attn_norm") if self.profiler else nullcontext():
+                # Attention output is the other Llama residual branch. Add it at
+                # the post-attention norm boundary to keep add+RMSNorm fused.
                 normed, residual = layer.post_norm(hidden, residual)
             with self.profiler.section("model.mlp") if self.profiler else nullcontext():
                 gate_up = F.linear(
@@ -577,6 +555,8 @@ class MiniLlamaLM(nn.Module):
             # Final normalization is applied to every valid token in the step,
             # but logits are only needed for the last token of each request.
             if residual is not None:
+                # Flush the final layer's deferred MLP output into the residual
+                # stream before the final RMSNorm.
                 hidden, _ = self.norm(hidden, residual)
             else:
                 hidden = self.norm(hidden)

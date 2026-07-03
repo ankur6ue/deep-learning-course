@@ -12,7 +12,9 @@ v4  paged FlashAttention backend
 v5  packed projections, cached RoPE, local kernels, prefill slot mapping
 v6  torch.compile for pure tensor model-body regions
 v7  async GPU/CPU control-plane communication
-v8  decode CUDA graph replay
+v8  decode and all-valid prefill CUDA graph replay
+v9  GPU-resident decode metadata
+v10 architecture adapters for Gemma 4 text checkpoints
 ```
 
 ## v1: Serving Control Plane
@@ -62,7 +64,8 @@ Core concepts:
 - FlashAttention reads K/V through `block_tables_i32` instead of dense gathered K/V.
 - `cu_seqlens_q` describes packed query offsets.
 - `valid_query_rows` maps padded batch layout to FlashAttention's flat query layout.
-- `decode_slot_mapping` lets decode write one token's K/V directly to its physical cache slot.
+- `decode_slot_mapping` lets decode write one token's K/V directly to its physical cache slot, still using PyTorch `index_copy_`.
+- Prefill intentionally still uses the general `write_batch()` -> `write_tokens()` path.
 - Projections remain separate: `q_proj`, `k_proj`, `v_proj`, `gate_proj`, `up_proj`.
 
 What is intentionally not here:
@@ -84,7 +87,8 @@ Core concepts:
 - Build a reusable RoPE cos/sin cache.
 - Apply RoPE with a local Triton kernel when CUDA is available.
 - Use local kernels for RMSNorm, fused residual-add RMSNorm, SwiGLU, and slot-mapped K/V writes.
-- Add `prefill_slot_mapping`, a padded 2D physical-slot map for prompt chunks.
+- Add `prefill_slot_mapping`, a padded 2D physical-slot map for prompt chunks, computed once per batch before the layer loop.
+- Use a Triton cache-write kernel for slot-mapped K/V copies when CUDA inputs are compatible.
 
 What is intentionally not here:
 
@@ -112,16 +116,43 @@ Core concepts:
 - Build next decode inputs from GPU state.
 - Copy sampled tokens back to CPU asynchronously for output/EOS bookkeeping.
 
-## v8: Decode CUDA Graphs
+## v8: CUDA Graph Replay
 
 This version adds graph replay after the eager path is already optimized.
 
 Core concepts:
 
-- Fixed-shape graph buckets.
+- Fixed-shape decode graph buckets for one-token decode batches.
+- Fixed-shape prefill graph buckets for the simple all-valid prompt-chunk case.
+- Ragged prefill chunks still run eager, because padding and masking those
+  variable shapes would obscure the graph concept.
 - Static input/output/metadata tensors.
 - Scratch rows and scratch KV blocks for padding.
 - Replay mutates metadata values in place while tensor addresses stay stable.
+
+## v9: GPU-Resident Decode Metadata
+
+This version removes a remaining Python/H2D decode cost after graph replay.
+
+Core concepts:
+
+- Keep request block tables in a persistent GPU tensor keyed by request slot.
+- Update a request's GPU block-table row only when `req.block_ids` grows.
+- Stage only request slots and cached sequence lengths each decode step.
+- Use a Triton kernel to gather the active block-table rows into FlashAttention's batch metadata.
+
+## v10: Architecture Adapters for Gemma 4
+
+This version keeps the v9 serving/dataflow structure but makes the model layer
+shape configurable enough for Gemma 4 text checkpoints.
+
+Core concepts:
+
+- Carry an explicit `architecture` field in `ModelConfig`.
+- Allow per-layer attention head dimensions and KV-head counts.
+- Represent Gemma layer types so sliding-attention and full-attention layers can use different RoPE parameters.
+- Add Gemma's Q/K/V normalization, four RMSNorms per layer, tied embeddings, logit softcapping, GELU-tanh gated MLP, and learned layer scalars.
+- Use vLLM's Triton unified attention wrapper for the mixed head-size/sliding-window paged attention cases that the FlashAttention path does not cover cleanly.
 
 ## Current Short Benchmark Snapshot
 
