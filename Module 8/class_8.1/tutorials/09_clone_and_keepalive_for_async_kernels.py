@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tutorial 3: cloned inputs and keepalive references for async kernels.
+"""Tutorial 9: cloned inputs and keepalive references for async kernels.
 
 This script demonstrates two related ideas from `v5` RoPE:
 
@@ -310,7 +310,7 @@ def main() -> None:
         print("CUDA is not available; this tutorial needs a CUDA GPU.")
         return
 
-    print("Tutorial 3: cloned inputs and keepalive references")
+    print("Tutorial 9: cloned inputs and keepalive references")
     warmup_copy_kernel(args)
     print()
     run_copy_without_clone_on_sidestream(args)

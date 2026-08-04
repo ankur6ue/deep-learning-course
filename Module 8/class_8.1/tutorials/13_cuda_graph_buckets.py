@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Tutorial 7: CUDA graph replay, validation, and graph buckets.
+"""Tutorial 13: CUDA graph replay, validation, and graph buckets.
 
-Tutorial 5 compared eager PyTorch, torch.compile, and a custom Triton kernel for
+Tutorial 11 compared eager PyTorch, torch.compile, and a custom Triton kernel for
 one transformer-like tail:
 
     projected = output_projection(attn_heads)
@@ -96,9 +96,9 @@ class BenchResult:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tokens", type=int, default=512)
-    parser.add_argument("--hidden-size", type=int, default=2048)
-    parser.add_argument("--attn-size", type=int, default=2048)
+    parser.add_argument("--tokens", type=int, default=1024)
+    parser.add_argument("--hidden-size", type=int, default=4096)
+    parser.add_argument("--attn-size", type=int, default=4096)
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--iters", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
@@ -510,10 +510,10 @@ def print_nsight_commands(script_path: Path, args: argparse.Namespace) -> None:
             "  "
             "nsys profile --force-overwrite=true --trace=cuda,nvtx "
             "--capture-range=cudaProfilerApi "
-            f"--output /tmp/tutorial7_{variant} "
+            f"--output /tmp/tutorial13_{variant} "
             f"{base} --profile-variant {variant} --cuda-profiler-range"
         )
-        print(f"  nsys stats --report cuda_api_sum,cuda_gpu_kern_sum /tmp/tutorial7_{variant}.nsys-rep")
+        print(f"  nsys stats --report cuda_api_sum,cuda_gpu_kern_sum /tmp/tutorial13_{variant}.nsys-rep")
     print()
     print("What to look for:")
     print("  - eager/compile loops show many CPU CUDA API launches per iteration.")
@@ -561,7 +561,7 @@ def main() -> None:
     eager_fn_0 = lambda: projection_add_rms_norm(*base_inputs.as_args())
     compiled_fn_0 = lambda: compiled_fn(*base_inputs.as_args())
 
-    print("Tutorial 7: CUDA graph replay and graph buckets")
+    print("Tutorial 13: CUDA graph replay and graph buckets")
     print(
         f"tokens={args.tokens}, hidden={args.hidden_size}, "
         f"attn={args.attn_size}, dtype={args.dtype}"

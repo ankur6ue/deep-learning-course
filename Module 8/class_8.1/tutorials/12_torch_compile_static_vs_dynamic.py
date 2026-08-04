@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Tutorial 6: torch.compile(dynamic=False) vs dynamic=True.
+"""Tutorial 12: torch.compile(dynamic=False) vs dynamic=True.
 
-Tutorial 5 keeps the comparison simple: eager, static compile, and a custom
+Tutorial 11 keeps the comparison simple: eager, static compile, and a custom
 kernel. This tutorial isolates a different question:
 
     What do we get, and what do we pay, when we use dynamic=True?
@@ -467,7 +467,7 @@ def main() -> None:
     static_fn = lambda: compiled_static(*base_inputs.as_args())
     dynamic_fn = lambda: compiled_dynamic(*base_inputs.as_args())
 
-    print("Tutorial 6: torch.compile static vs dynamic shapes")
+    print("Tutorial 12: torch.compile static vs dynamic shapes")
     print(f"tokens={args.tokens}, hidden={args.hidden_size}, dtype={args.dtype}")
     print("Compiling both modes at the base shape...")
 

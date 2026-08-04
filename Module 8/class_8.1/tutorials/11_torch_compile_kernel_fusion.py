@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tutorial 5: torch.compile, CUDA async execution, and custom kernels.
+"""Tutorial 11: torch.compile, CUDA async execution, and custom kernels.
 
 This tutorial uses one transformer-like sequence to show the difference between
 three execution styles:
@@ -418,7 +418,7 @@ def main() -> None:
     attn_heads = torch.randn((args.tokens, args.attn_size), device=device, dtype=dtype)
     o_weight = torch.randn((args.hidden_size, args.attn_size), device=device, dtype=dtype)
 
-    # Tutorial 6 compares dynamic=True with dynamic=False. Here we use the
+    # Tutorial 12 compares dynamic=True with dynamic=False. Here we use the
     # fixed-shape/static form so this file can focus on fusion.
     compiled_tail = torch.compile(
         eager_projection_add_rms_norm,
@@ -458,7 +458,7 @@ def main() -> None:
         )
         return
 
-    print("Tutorial 5: torch.compile vs custom kernel fusion")
+    print("Tutorial 11: torch.compile vs custom kernel fusion")
     print(f"tokens={args.tokens}, hidden={args.hidden_size}, attn={args.attn_size}, dtype={args.dtype}")
     print()
     print("Reminder: all timings synchronize after each measured iteration.")

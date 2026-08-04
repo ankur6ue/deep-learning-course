@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tutorial 1: CUDA launches are asynchronous even with plain PyTorch.
+"""Tutorial 7: CUDA launches are asynchronous even with plain PyTorch.
 
 This script does not use Triton yet. It shows the baseline CUDA behavior that
 Triton inherits: Python queues GPU work quickly, then continues. The GPU work is
@@ -43,7 +43,7 @@ def main() -> None:
         _ = a @ b
     torch.cuda.synchronize()
 
-    print("Tutorial 1: PyTorch CUDA launch vs actual completion")
+    print("Tutorial 7: PyTorch CUDA launch vs actual completion")
     print(f"matrix size: {args.size} x {args.size}")
     print()
 

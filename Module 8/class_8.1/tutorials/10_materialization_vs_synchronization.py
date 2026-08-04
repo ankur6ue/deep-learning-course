@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tutorial 4: materialization, views, and synchronization.
+"""Tutorial 10: materialization, views, and synchronization.
 
 The word "materialization" is easy to overload. In this tutorial it means
 "storage materialization": PyTorch has produced a Tensor object, and for
@@ -161,7 +161,7 @@ def main() -> None:
         print("CUDA is not available; this tutorial needs a CUDA GPU.")
         return
 
-    print("Tutorial 4: materialization vs synchronization")
+    print("Tutorial 10: materialization vs synchronization")
     print()
     print("Storage-materialized means a Tensor/storage exists.")
     print("Synchronized means the CPU has waited for queued GPU work to finish.")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tutorial 2: a custom Triton kernel also launches asynchronously.
+"""Tutorial 8: a custom Triton kernel also launches asynchronously.
 
 The kernel below performs a simple vector add. The operation is intentionally
 simple because the point is not the math; the point is launch semantics:
@@ -69,7 +69,7 @@ def main() -> None:
         _vector_add_kernel[grid](x, y, out, args.elements, BLOCK=args.block_size)
     torch.cuda.synchronize()
 
-    print("Tutorial 2: Triton launch vs actual completion")
+    print("Tutorial 8: Triton launch vs actual completion")
     print(f"elements: {args.elements:,}")
     print()
 
