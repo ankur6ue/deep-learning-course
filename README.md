@@ -74,3 +74,9 @@ Covers the design principles behind LLM serving systems and how they are impleme
 ### Module 9: Quantization and Optimization
 
 Covers key techniques for quantization and optimization of neural networks, such as Activation Aware Quantization (AWQ), using hardware-specific numerical formats such as NVFP4 
+
+### Module 10: GPU Kernel Optimizations
+
+Covers GPU kernel optimization techniques through focused experiments,
+including the interaction between LoRA rank and split-K parallelism during
+decode.
